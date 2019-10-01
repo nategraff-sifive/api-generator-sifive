@@ -30,6 +30,7 @@ def skeletalPlanToPlan skeletalDriverPlan =
 
   def omfile = write "{workspace}/build/api-generator-sifive/{name}/objectmodel.json" objModel
   def cmd =
+    (which "python3.7"),
     "{here}/../scripts/om2files.py".simplify,
     omfile.getPathName,
     skeletalDriverPlan.getSkeletalDriverPlanDuhFile.getPathName,
@@ -48,6 +49,7 @@ def skeletalPlanToPlan skeletalDriverPlan =
 
 def makeSkeletalDrivers skeletalDriverPlan =
   skeletalPlanToPlan skeletalDriverPlan
+  | addPythonEnv ("{here}/../scripts/om2files_env".simplify)
   | runJob
   | getJobStderr
 
