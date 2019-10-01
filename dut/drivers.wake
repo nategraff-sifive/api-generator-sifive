@@ -1,0 +1,57 @@
+
+tuple SkeletalDriverPlan =
+  global DuhFile:             Path
+  global CompanyName:         String
+  global DeviceName:          String
+  global LocalMetalDirectory: String
+  global DUTPlan:             RocketChipDUTPlan
+
+global def makeSkeletalDriverPlan = SkeletalDriverPlan _ _ _ _ _
+
+def getDevicePlan deviceName =
+  def plans = subscribe skeletalDriverPlans
+  def samePlan aPlan =
+    if aPlan.getSkeletalDriverPlanDeviceName ==~ deviceName
+    then Some aPlan
+    else None
+  mapPartial samePlan plans
+  | head
+
+def skeletalPlanToPlan skeletalDriverPlan =
+  def objModel =
+    makeRTL (skeletalDriverPlan.getSkeletalDriverPlanDUTPlan)
+    | getDUTObjectModel
+    | prettyJSON
+
+  def name =
+    skeletalDriverPlan
+    | getSkeletalDriverPlanDUTPlan
+    | getRocketChipDUTPlanName
+
+  def omfile = write "{workspace}/build/api-generator-sifive/{name}/objectmodel.json" objModel
+  def cmd =
+    "{here}/../scripts/om2files.py".simplify,
+    omfile.getPathName,
+    skeletalDriverPlan.getSkeletalDriverPlanDuhFile.getPathName,
+    skeletalDriverPlan.getSkeletalDriverPlanCompanyName,
+    skeletalDriverPlan.getSkeletalDriverPlanDeviceName,
+    skeletalDriverPlan.getSkeletalDriverPlanLocalMetalDirectory,
+    Nil
+  def visibleFiles =
+    "{here}/../scripts/om2files.py".simplify.source,
+    skeletalDriverPlan.getSkeletalDriverPlanDuhFile,
+    omfile,
+    skeletalDriverPlan.getSkeletalDriverPlanLocalMetalDirectory.source,
+    Nil
+
+  makePlan cmd visibleFiles
+
+def makeSkeletalDrivers skeletalDriverPlan =
+  skeletalPlanToPlan skeletalDriverPlan
+  | runJob
+  | getJobStderr
+
+global def createSkeletalDriver deviceName =
+  getDevicePlan deviceName
+  | omap makeSkeletalDrivers
+
