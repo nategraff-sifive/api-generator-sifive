@@ -66,9 +66,6 @@ def search_json_component(js_obj: JSONType, regex: re.Pattern) -> t.Iterator:
             for d in search_json_component(list(js_obj.values()), regex):
                 if d is not None:
                     yield d
-    elif isinstance(js_obj, str):
-        if regex.match(js_obj):
-            yield js_obj
 
 
 def find_component(js_obj: JSONType, regex_str: str) -> t.Iterator:

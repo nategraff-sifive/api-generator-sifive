@@ -1,59 +1,106 @@
 
-tuple SkeletalDriverPlan =
+tuple BasicDriverPlan =
   global DuhFile:             Path
-  global CompanyName:         String
+  global OMFile:              Unit => Path
+  global VendorName:          String
   global DeviceName:          String
   global LocalMetalDirectory: String
-  global DUTPlan:             RocketChipDUTPlan
+  global DUTName:             String
+  global OverwriteExisting:   Boolean
+  global OnlyBaseHeader:      Boolean
 
-global def makeSkeletalDriverPlan = SkeletalDriverPlan _ _ _ _ _
+# create a BasicDriverPlan
+# duhFile => path to your duh file (device.json5)
+# OMFile => a function to produce the OMFile, takes Unit as an arg
+# VendorName => the vendor name used for the device
+# DeviceName => the name of the device
+# LocalMetalDirectory => the metal/drivers directory in the device's repository
+global def makeBasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory dutName=
+  BasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory dutName True False
 
-def getDevicePlan deviceName =
-  def plans = subscribe skeletalDriverPlans
+# This function provides an external interface through the
+# publish/subscribe varible 'basicDriverPlans'
+# If you want automatic basic driver creation, create
+# a BasicDriverPlan using makeBasicDriverPlan
+# Then build the drivers by calling
+# crateBasicDriver
+def getDevicePlan dutName =
+  def plans = subscribe basicDriverPlans
   def samePlan aPlan =
-    if aPlan.getSkeletalDriverPlanDeviceName ==~ deviceName
-    then Some aPlan
-    else None
-  mapPartial samePlan plans
-  | head
+    aPlan.getBasicDriverPlanDUTName ==~ dutName
+  find samePlan plans
+  | omap getPairFirst
 
-def skeletalPlanToPlan skeletalDriverPlan =
-  def objModel =
-    makeRTL (skeletalDriverPlan.getSkeletalDriverPlanDUTPlan)
-    | getDUTObjectModel
-    | prettyJSON
-
-  def name =
-    skeletalDriverPlan
-    | getSkeletalDriverPlanDUTPlan
-    | getRocketChipDUTPlanName
-
-  def omfile = write "{workspace}/build/api-generator-sifive/{name}/objectmodel.json" objModel
+def basicPlanToPlan basicDriverPlan =
+  def omfile = basicDriverPlan.getBasicDriverPlanOMFile Unit
+  def extraFlags =
+    def overwrite =
+      if !basicDriverPlan.getBasicDriverPlanOverwriteExisting
+      then "-x", Nil
+      else Nil
+    def onlyBaseHeader =
+      if basicDriverPlan.getBasicDriverPlanOnlyBaseHeader
+      then "-b", Nil
+      else Nil
+    overwrite ++ onlyBaseHeader
   def cmd =
-    (which "python3.7"),
-    "{here}/../scripts/om2files.py".simplify,
+    "{here}/../scripts/generate_drivers.py".simplify,
+    "-o",
     omfile.getPathName,
-    skeletalDriverPlan.getSkeletalDriverPlanDuhFile.getPathName,
-    skeletalDriverPlan.getSkeletalDriverPlanCompanyName,
-    skeletalDriverPlan.getSkeletalDriverPlanDeviceName,
-    skeletalDriverPlan.getSkeletalDriverPlanLocalMetalDirectory,
+    "-d",
+    basicDriverPlan.getBasicDriverPlanDuhFile.getPathName,
+    "-v",
+    basicDriverPlan.getBasicDriverPlanVendorName,
+    "-D",
+    basicDriverPlan.getBasicDriverPlanDeviceName,
+    "-m",
+    basicDriverPlan.getBasicDriverPlanLocalMetalDirectory,
     Nil
+    ++ extraFlags
   def visibleFiles =
-    "{here}/../scripts/om2files.py".simplify.source,
-    skeletalDriverPlan.getSkeletalDriverPlanDuhFile,
+    "{here}/../scripts/generate_drivers.py".simplify.source,
+    basicDriverPlan.getBasicDriverPlanDuhFile,
     omfile,
-    skeletalDriverPlan.getSkeletalDriverPlanLocalMetalDirectory.source,
+    basicDriverPlan.getBasicDriverPlanLocalMetalDirectory.source,
     Nil
-
   makePlan cmd visibleFiles
 
-def makeSkeletalDrivers skeletalDriverPlan =
-  skeletalPlanToPlan skeletalDriverPlan
-  | addPythonEnv ("{here}/../scripts/om2files_env".simplify)
+global tuple DriverOutput =
+  global CFiles:      List Path
+  global IncludeDirs: List String
+
+def makeDriverOutput basicDriverPlan jobOutputs =
+  def ifPathCfile path =
+    path.getPathName
+    | matches `.*\.[c,h]`
+  def cFiles = filter ifPathCfile jobOutputs
+  def metalDir = basicDriverPlan.getBasicDriverPlanLocalMetalDirectory
+  def deviceName = basicDriverPlan.getBasicDriverPlanDeviceName
+  def includeDirs =
+    "{metalDir}",
+    Nil
+  DriverOutput
+  cFiles
+  includeDirs
+
+def makeBasicDrivers basicDriverPlan =
+  basicPlanToPlan basicDriverPlan
+  | addPythonEnv ("{here}/../scripts/generate_drivers_env".simplify)
   | runJob
-  | getJobStderr
+  | getJobOutputs
+  | makeDriverOutput basicDriverPlan
 
-global def createSkeletalDriver deviceName =
-  getDevicePlan deviceName
-  | omap makeSkeletalDrivers
+# External wake target to create basic drivers
+# deviceName => the name of the DUT plan
+global def createBasicDriver dutPlanName =
+  getDevicePlan dutPlanName
+  | omap makeBasicDrivers
 
+# wake target to create basic drivers from internal code where
+# omfile is generated
+# deviceName => the name of the DUT Plan
+global def createBasicDriverWithOMFile dutPlanName omfile =
+  def omfileArg _ = omfile
+  getDevicePlan dutPlanName
+  | omap (setBasicDriverPlanOMFile omfileArg)
+  | omap makeBasicDrivers
