@@ -5,7 +5,7 @@ tuple ScalaBlock =
 global def makeScalaBlock module config =
   ScalaBlock module config
 
-global tuple RocketChipDUTPlan =
+tuple RocketChipDUTPlan =
   global Testharness:      String
   global Configs:          List String
   global Name:             String
