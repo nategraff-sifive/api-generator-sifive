@@ -65,9 +65,12 @@ def basicPlanToPlan basicDriverPlan =
     Nil
   makePlan cmd visibleFiles
 
-global tuple DriverOutput =
+tuple DriverOutput =
   global CFiles:      List Path
   global IncludeDirs: List String
+
+global def makeNilDriverOutput =
+  DriverOutput Nil Nil
 
 def makeDriverOutput basicDriverPlan jobOutputs =
   def ifPathCfile path =
