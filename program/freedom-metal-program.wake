@@ -182,7 +182,7 @@ global def freedomMetalDUTProgramCompiler =
     def omFile =
       dut.getDUTObjectModel
       | prettyJSON
-      | write "{workspace}/build/api-generator-sifive/{dut.getDUTName}/programs/omfile.json"
+      | write "build/api-generator-sifive/{dut.getDUTName}/programs/omfile.json"
     def driverFiles =  match (createBasicDriverWithOMFile dut.getDUTName omFile)
       Some a = a
       None   = makeNilDriverOutput
