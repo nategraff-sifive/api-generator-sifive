@@ -1,5 +1,4 @@
-#!/home/stillson/lpy/bin/python
-# !/usr/bin/env python3.7
+#!/usr/bin/env python3.7
 
 import argparse
 import json
@@ -405,7 +404,8 @@ def generate_base_functions(device: str, reg_list: t.List[Register]) -> str:
             {{
                 volatile uint32_t *control_base = {device}_base;
                 METAL_{cap_device}_REGW(METAL_{cap_device}_{cap_name}) = data;
-            }}"""
+            }}
+            """
 
         rv.append(textwrap.dedent(write_func))
 
@@ -415,7 +415,7 @@ def generate_base_functions(device: str, reg_list: t.List[Register]) -> str:
                 volatile uint32_t *control_base = {device}_base;
                 return METAL_{cap_device}_REGW(METAL_{cap_device}_{cap_name});
             }}
-        """
+            """
 
         rv.append(textwrap.dedent(read_func))
 
@@ -501,46 +501,53 @@ def handle_args():
         "-o",
         "--object-model",
         type=argparse.FileType('r'),
-        help="",
+        help="The pat to the object model file",
+        required=True,
     )
 
     parser.add_argument(
         "-d",
-        "--duh-file",
+        "--duh-document",
         type=argparse.FileType('r'),
-        help="",
+        help="The pathe to the DUH document",
+        required=True,
     )
 
     parser.add_argument(
-        "-v",
         "--vendor",
-        help="",
+        help="The vendor name",
+        required=True,
     )
 
     parser.add_argument(
         "-D",
         "--device",
-        help="",
+        help="The device name",
+        required=True,
     )
 
     parser.add_argument(
         "-m",
         "--metal-dir",
-        help="",
+        help="The path to the drivers/metal directory",
+        type=Path,
+        required=True,
     )
 
     parser.add_argument(
         "-x",
-        "--check-existence",
+        "--overwrite-existing",
         action="store_true",
-        default=False
+        default=False,
+        help="overwrite existing files"
     )
 
     parser.add_argument(
         "-H",
         "--base-header-only",
         action="store_true",
-        default=False
+        default=False,
+        help="Create only base header file, not drivers"
     )
 
     return parser.parse_args()
@@ -559,13 +566,12 @@ def main():
     args = handle_args()
 
     object_model = json.load(args.object_model)
-    duh_info = json5.load(args.duh_file)
+    duh_info = json5.load(args.duh_document)
     vendor = args.vendor
     device = args.device
-    metal_dir = args.metal_dir
-    check_existence = args.check_existence
+    m_dir_path = args.metal_dir
+    overwrite_existing = args.overwrite_existing
     base_header_only = args.base_header_only
-    m_dir_path = Path(metal_dir)
 
     # process register info from duh
     addr_blocks = (i['addressBlocks'][0] for i in
@@ -579,9 +585,10 @@ def main():
         offset: int = a_reg['addressOffset'] // 8
         width: int = a_reg['size']
         if width not in (8, 16, 32, 64):
-            raise Exception(f'Invalid Register width {width}, register: '
-                            f'{name}, not 8, 16, 32, or 64'
-                            f'fix register width in duh file')
+            raise Exception(f'Invalid register width {width}, for register '
+                            f'{name}.\n'
+                            f'Width should be not 8, 16, 32, or 64.\n'
+                            f'Please fix the register width in DUH document.')
 
         reglist.append(Register(name, offset, width))
 
@@ -592,8 +599,7 @@ def main():
 
     m_hdr_path = m_dir_path / device
 
-    if not m_hdr_path.exists():
-        m_hdr_path.mkdir()
+    m_hdr_path.mkdir(exist_ok=True, parents=True)
 
     for index, om in devices_enumerated:
         base = om['addressSets'][0]['base']
@@ -602,7 +608,7 @@ def main():
         if index == 0:
             if not base_header_only:
                 driver_file_path = m_dir_path / f'{vendor}_{device}.c'
-                if driver_file_path.exists() or not check_existence:
+                if driver_file_path.exists() or overwrite_existing:
                     driver_file_path.write_text(
                         generate_metal_dev_drv(vendor, device, index, reglist))
                 else:
@@ -610,7 +616,7 @@ def main():
                           file=sys.stderr)
 
             base_header_path = m_hdr_path / f'{vendor}_{device}.h'
-            if not base_header_path.exists() and not check_existence:
+            if not base_header_path.exists() and overwrite_existing:
                 base_header_path.write_text(
                     generate_base_hdr(vendor, device, base, reglist)
                 )
@@ -621,7 +627,7 @@ def main():
         if not base_header_only:
             header_file_path = m_hdr_path / f'{vendor}_{device}{index}.h'
             if not base_header_only and \
-                    not header_file_path.exists() or not check_existence:
+                    not header_file_path.exists() or overwrite_existing:
                 header_file_path.write_text(
                     generate_metal_dev_hdr(vendor, device, index, base, reglist))
             else:

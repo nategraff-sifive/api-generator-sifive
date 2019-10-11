@@ -18,12 +18,10 @@ tuple BasicDriverPlan =
 global def makeBasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory dutName =
   BasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory dutName True False
 
-# This function provides an external interface through the
-# publish/subscribe variable 'basicDriverPlans'
-# If you want automatic basic driver creation, create
-# a BasicDriverPlan using makeBasicDriverPlan
-# Then build the drivers by calling
-# crateBasicDriver
+# This function provides an external interface through the publish/subscribe
+# variable 'basicDriverPlans' If you want automatic basic driver creation,
+# create a BasicDriverPlan using makeBasicDriverPlan, Then build the drivers
+# by calling createBasicDriver
 def getDevicePlan dutName =
   def plans = subscribe basicDriverPlans
   def samePlan aPlan =
@@ -35,60 +33,59 @@ def basicPlanToPlan basicDriverPlan =
   def omfile = basicDriverPlan.getBasicDriverPlanOMFile Unit
   def extraFlags =
     def overwrite =
-      if !basicDriverPlan.getBasicDriverPlanOverwriteExisting
-      then "-x", Nil
+      if basicDriverPlan.getBasicDriverPlanOverwriteExisting
+      then "--overwrite-existing", Nil
       else Nil
     def onlyBaseHeader =
       if basicDriverPlan.getBasicDriverPlanOnlyBaseHeader
-      then "-b", Nil
+      then "--base-header-only", Nil
       else Nil
     overwrite ++ onlyBaseHeader
   def cmd =
     "{here}/../scripts/generate_drivers.py".simplify,
-    "-o",
+    "--object-model",
     omfile.getPathName,
-    "-d",
-    basicDriverPlan.getBasicDriverPlanDuhFile.getPathName,
-    "-v",
+    "--duh-document",
+    basicDriverPlan.getBasicDriverPlanDUHDocument.getPathName,
+    "--vendor",
     basicDriverPlan.getBasicDriverPlanVendorName,
-    "-D",
+    "--device",
     basicDriverPlan.getBasicDriverPlanDeviceName,
-    "-m",
+    "--metal-dir",
     basicDriverPlan.getBasicDriverPlanLocalMetalDirectory,
-    Nil
-    ++ extraFlags
+    extraFlags
   def visibleFiles =
     "{here}/../scripts/generate_drivers.py".simplify.source,
-    basicDriverPlan.getBasicDriverPlanDuhFile,
+    basicDriverPlan.getBasicDriverPlanDUHDocument,
     omfile,
     basicDriverPlan.getBasicDriverPlanLocalMetalDirectory.source,
     Nil
   makePlan cmd visibleFiles
+  | addPythonEnv ("{here}/../scripts/generate_drivers_env".simplify)
 
 tuple DriverOutput =
   global CFiles:      List Path
   global IncludeDirs: List String
 
-global def makeNilDriverOutput =
-  DriverOutput Nil Nil
+def foo x =
+  def bar = format x | println
+  x
 
 def makeDriverOutput basicDriverPlan jobOutputs =
-  def ifPathCfile path =
+  def ifPathCFile path =
     path.getPathName
     | matches `.*\.[c,h]`
-  def cFiles = filter ifPathCfile jobOutputs
+  def cFiles = filter ifPathCFile jobOutputs
   def metalDir = basicDriverPlan.getBasicDriverPlanLocalMetalDirectory
   def deviceName = basicDriverPlan.getBasicDriverPlanDeviceName
   def includeDirs =
-    "{metalDir}",
+    metalDir,
     Nil
-  DriverOutput
-  cFiles
-  includeDirs
+  DriverOutput cFiles includeDirs
+
 
 def makeBasicDrivers basicDriverPlan =
   basicPlanToPlan basicDriverPlan
-  | addPythonEnv ("{here}/../scripts/generate_drivers_env".simplify)
   | runJob
   | getJobOutputs
   | makeDriverOutput basicDriverPlan
@@ -107,3 +104,4 @@ global def createBasicDriverWithOMFile dutPlanName omfile =
   getDevicePlan dutPlanName
   | omap (setBasicDriverPlanOMFile omfileArg)
   | omap makeBasicDrivers
+  | getOrElse (DriverOutput Nil Nil)

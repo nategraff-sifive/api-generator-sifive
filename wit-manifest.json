@@ -15,7 +15,7 @@
         "source": "git@github.com:chipsalliance/rocket-chip.git"
     },
     {
-        "commit": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        "commit": "e2342037082259e094c7e7650c599e9ea47b6a15",
         "name": "wake-languages-sifive",
         "source": "git@github.com:sifive/wake-languages-sifive.git"
     }
