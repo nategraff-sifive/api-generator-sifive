@@ -559,9 +559,6 @@ def main():
     :return: exits 0 on success, 1 on failure
     """
 
-    # debugging
-    print(sys.argv, file=sys.stderr)
-
     # parse args
     args = handle_args()
 
@@ -574,10 +571,10 @@ def main():
     base_header_only = args.base_header_only
 
     # process register info from duh
-    addr_blocks = (i['addressBlocks'][0] for i in
-                   find_component(duh_info, 'addressBlocks'))
+    addr_blocks = [i['addressBlocks'][0] for i in
+                   find_component(duh_info, 'addressBlocks')]
 
-    regs = next(addr_blocks)['registers']
+    regs = addr_blocks[0]['registers']
 
     reglist: t.List[Register] = []
     for a_reg in regs:
@@ -594,14 +591,14 @@ def main():
 
     # parse OM to find base address of all devices
     memory_regions = find_json_field_name(object_model, '_types', 'OMMemoryRegion')
-    devices = find_json_field_name(memory_regions, 'name', f'{device}.*')
-    devices_enumerated = list(enumerate(devices))
+    devices_addr = find_json_field_name(memory_regions, 'name', f'{device}.*')
+    devices_addr_enumerated = list(enumerate(devices_addr))
 
     m_hdr_path = m_dir_path / device
 
     m_hdr_path.mkdir(exist_ok=True, parents=True)
 
-    for index, om in devices_enumerated:
+    for index, om in devices_addr_enumerated:
         base = om['addressSets'][0]['base']
 
         # use index 0 for operation to only run once
