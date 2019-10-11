@@ -1,6 +1,6 @@
 
 tuple BasicDriverPlan =
-  global DuhFile:             Path
+  global DUHDocument:         Path
   global OMFile:              Unit => Path
   global VendorName:          String
   global DeviceName:          String
