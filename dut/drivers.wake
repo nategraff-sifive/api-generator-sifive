@@ -19,7 +19,7 @@ global def makeBasicDriverPlan duhFile omFile vendorName deviceName localMetalDi
   BasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory dutName True False
 
 # This function provides an external interface through the
-# publish/subscribe varible 'basicDriverPlans'
+# publish/subscribe variable 'basicDriverPlans'
 # If you want automatic basic driver creation, create
 # a BasicDriverPlan using makeBasicDriverPlan
 # Then build the drivers by calling
