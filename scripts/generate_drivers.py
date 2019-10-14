@@ -223,18 +223,18 @@ METAL_BASE_HDR_TMPL = \
     """
     #include <metal/compiler.h>
     #include <metal/io.h>
-    
+
     #ifndef ${vendor}_${device}_h
     #define ${vendor}_${device}_h
     #define ${cap_device}_BASE ${base_address}
-    
+
     // : these macros have control_base as a hidden input
     #define METAL_${cap_device}_REG(offset) (((unsigned long)control_base + offset))
     #define METAL_${cap_device}_REGW(offset) \\
        (__METAL_ACCESS_ONCE((__metal_io_u32 *)METAL_${cap_device}_REG(offset)))
-    
+
     ${register_offsets}
-    
+
     #endif
     """
 
@@ -282,22 +282,22 @@ METAL_DEV_HDR_TMPL = \
     #include <stdint.h>
     #include <stdlib.h>
     #include <${device}/${vendor}_${device}.h>
-    
+
     #ifndef ${vendor}_${device}${index}_h
     #define ${vendor}_${device}${index}_h
-    
+
     struct metal_${device};
-    
+
     struct metal_${device}_vtable {
     ${vtable}
     };
-    
+
     struct metal_${device} {
     ${metal_device}
     };
-    
+
     __METAL_DECLARE_VTABLE(metal_${device})
-    
+
     ${protos}
     #endif
     """
@@ -332,22 +332,22 @@ METAL_DEV_DRV_TMPL = \
     """
     #include <stdint.h>
     #include <stdlib.h>
-    
+
     #include <${device}/${vendor}_${device}${index}.h>
     #include <metal/compiler.h>
     #include <metal/io.h>
-    
+
     ${base_functions}
-    
+
     ${metal_functions}
-    
+
     __METAL_DEFINE_VTABLE(metal_${device}) = {
     ${def_vtable}
     };
-    
+
     const struct metal_${device}* ${device}_tables[] = {&metal_${device}};
     uint8_t ${device}_tables_cnt = 1;
-    
+
     const struct metal_${device}* get_metal_${device}(uint8_t idx)
     {
         if (idx >= ${device}_tables_cnt)
