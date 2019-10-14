@@ -67,17 +67,12 @@ tuple DriverOutput =
   global CFiles:      List Path
   global IncludeDirs: List String
 
-def foo x =
-  def bar = format x | println
-  x
-
 def makeDriverOutput basicDriverPlan jobOutputs =
   def ifPathCFile path =
     path.getPathName
     | matches `.*\.[c,h]`
   def cFiles = filter ifPathCFile jobOutputs
   def metalDir = basicDriverPlan.getBasicDriverPlanLocalMetalDirectory
-  def deviceName = basicDriverPlan.getBasicDriverPlanDeviceName
   def includeDirs =
     metalDir,
     Nil
