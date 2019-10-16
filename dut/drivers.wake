@@ -5,9 +5,11 @@ tuple BasicDriverPlan =
   global VendorName:          String
   global DeviceName:          String
   global LocalMetalDirectory: String
+  global BSPDirectory:        String
   global DUTName:             String
   global OverwriteExisting:   Boolean
-  global OnlyBaseHeader:      Boolean
+  global BaseHeader:          Boolean
+  global BasicDrivers:        Boolean
 
 # create a BasicDriverPlan
 # duhFile => path to your duh file (device.json5)
@@ -15,8 +17,8 @@ tuple BasicDriverPlan =
 # VendorName => the vendor name used for the device
 # DeviceName => the name of the device
 # LocalMetalDirectory => the metal/drivers directory in the device's repository
-global def makeBasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory dutName =
-  BasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory dutName True False
+global def makeBasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory bspDirectory dutName =
+  BasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory bspDirectory dutName True True True
 
 # This function provides an external interface through the publish/subscribe
 # variable 'basicDriverPlans' If you want automatic basic driver creation,
@@ -36,11 +38,15 @@ def basicPlanToPlan basicDriverPlan =
       if basicDriverPlan.getBasicDriverPlanOverwriteExisting
       then "--overwrite-existing", Nil
       else Nil
-    def onlyBaseHeader =
-      if basicDriverPlan.getBasicDriverPlanOnlyBaseHeader
-      then "--base-header-only", Nil
+    def baseHeader =
+      if basicDriverPlan.getBasicDriverPlanBaseHeader
+      then "--base-header", Nil
       else Nil
-    overwrite ++ onlyBaseHeader
+    def basicDrivers =
+      if basicDriverPlan.getBasicDriverPlanBasicDrivers
+      then "--basic-drivers", Nil
+      else Nil
+    overwrite ++ baseHeader ++ basicDrivers
   def cmd =
     "{here}/../scripts/generate_drivers.py".simplify,
     "--object-model",
@@ -53,6 +59,8 @@ def basicPlanToPlan basicDriverPlan =
     basicDriverPlan.getBasicDriverPlanDeviceName,
     "--metal-dir",
     basicDriverPlan.getBasicDriverPlanLocalMetalDirectory,
+    "--bsp-dir",
+    basicDriverPlan.getBasicDriverPlanBSPDirectory,
     extraFlags
   def visibleFiles =
     "{here}/../scripts/generate_drivers.py".simplify.source,
@@ -75,6 +83,7 @@ def makeDriverOutput basicDriverPlan jobOutputs =
   def metalDir = basicDriverPlan.getBasicDriverPlanLocalMetalDirectory
   def includeDirs =
     metalDir,
+    basicDriverPlan.getBasicDriverPlanBSPDirectory,
     Nil
   DriverOutput cFiles includeDirs
 

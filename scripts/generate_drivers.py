@@ -2,11 +2,9 @@
 
 import argparse
 import json
-import re
 import string
 import sys
 import textwrap
-import types
 import typing as t
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,8 +15,26 @@ import json5
 # JSON support
 ###
 
-# type variable to handle our use of json
-JSONType = t.TypeVar('JSONType', dict, list, str, int, float, bool, t.Iterator)
+PlainJSONType = t.Union[dict, list, t.AnyStr, float, bool]
+JSONType = t.Union[PlainJSONType, t.Iterator[PlainJSONType]]
+
+
+def walk(j_obj: JSONType) -> t.Iterator[JSONType]:
+    """
+    Walk a parsed json object, returning inner nodes.
+    This allows the object to be parse in a pipeline like fashion.
+
+    :param j_obj: The object being parsed, or an iterator
+    :return: an iterator of matching objects
+    """
+    if isinstance(j_obj, dict):
+        yield j_obj
+        for v in j_obj.values():
+            yield from walk(v)
+    elif isinstance(j_obj, (list, t.Iterator)):
+        yield j_obj
+        for j in j_obj:
+            yield from walk(j)
 
 
 @dataclass(frozen=True)
@@ -30,115 +46,14 @@ class Register:
     offset: int  # in bytes
     width: int  # in bits
 
-
-class InvalidParsedJSON(Exception):
-    """
-    Raised when an object is passed as something that should
-    have been parsed from JSON, and isn't a List or a Dictionary.
-    """
-    pass
-
-
-def search_json_component(js_obj: JSONType, regex: re.Pattern) -> t.Iterator:
-    """
-    Search a json object for any key or string matching regex. Return a
-    generator for those objects.
-
-    :param js_obj: A parsed javascript object
-    :param regex: a compiled regular expression to search for.
-    :return: A generator returning matching parts
-    """
-    if isinstance(js_obj, (list, types.GeneratorType)):
-        for i in js_obj:
-            for j in search_json_component(i, regex):
-                if j is not None:
-                    yield j
-    elif isinstance(js_obj, dict):
-        sub_search = True
-        for k, v in js_obj.items():
-            if regex.match(k) or \
-                    isinstance(v, str) and regex.match(v):
-                yield js_obj
-                sub_search = False
-                break
-        if sub_search:
-            for d in search_json_component(list(js_obj.values()), regex):
-                if d is not None:
-                    yield d
-
-
-def find_component(js_obj: JSONType, regex_str: str) -> t.Iterator:
-    """
-
-    :param js_obj: A dict or list from a parsed json file
-    :param regex_str: A regular expression string to search js_obj for
-    :return: a list of matching parts
-    """
-    regex = re.compile(regex_str)
-
-    if isinstance(js_obj, (dict, list, types.GeneratorType)):
-        return (i for i in search_json_component(js_obj, regex)
-                if i is not None)
-    else:
-        raise InvalidParsedJSON(f"object not dict or list: {js_obj}")
-
-
-def search_json_field(js_obj: JSONType, field: str,
-                      regex: re.Pattern) -> t.Iterator:
-    """
-
-    :param js_obj: A dict or list from a parsed json file
-    :param field: The name of the field to be found
-    :param regex: A compiled regular expression to search values
-    :return: a generator that will produce matching dicts.
-    """
-
-    def check_match(value: t.Union[list, str]):
-        if isinstance(value, str):
-            if regex.match(value):
-                return True
-        elif isinstance(value, (list, types.GeneratorType)):
-            for val in value:
-                if isinstance(val, str) and regex.match(val):
-                    return True
-        return False
-
-    if isinstance(js_obj, dict):
-        if field in js_obj and check_match(js_obj[field]):
-            yield js_obj
-        else:
-            for v in search_json_field(list(js_obj.values()), field, regex):
-                if v is not None:
-                    yield v
-    elif isinstance(js_obj, (list, types.GeneratorType)):
-        for i in js_obj:
-            for j in search_json_field(i, field, regex):
-                if j is not None:
-                    yield j
-
-
-def find_json_field_name(js_obj: JSONType,
-                         field: str,
-                         regex_str: str) -> t.Iterator:
-    """
-    Search the python representation of a Json Dict or list for a field
-    whose value matches the given regex. Returns a list of matched dicts.
-    The value will match a string, or any value in a list of strings.
-
-    This function is a wrapper for search_json_field.
-
-    :param js_obj: A dict or list from a parsed json file
-    :param field: The name of the field to be found
-    :param regex_str: regular expression to search values for
-    :return: a list of matching dictionaries.
-    """
-    regex = re.compile(regex_str)
-
-    if isinstance(js_obj, (list, dict, types.GeneratorType)):
-        return (i for i in search_json_field(js_obj, field, regex)
-                if i is not None)
-    else:
-        raise InvalidParsedJSON(f"object not dict or list: {js_obj}")
+    @staticmethod
+    def make_register(name: str, offset: int, width: int) -> "Register":
+        if width not in (8, 16, 32, 64):
+            raise Exception(f'Invalid register width {width}, for register '
+                            f'{name}.\n'
+                            f'Width should be not 8, 16, 32, or 64.\n'
+                            f'Please fix the register width in DUH document.')
+        return Register(name, offset, width)
 
 
 ###
@@ -281,7 +196,7 @@ METAL_DEV_HDR_TMPL = \
     #include <metal/compiler.h>
     #include <stdint.h>
     #include <stdlib.h>
-    #include <${device}/${vendor}_${device}.h>
+    #include <bsp_${device}/${vendor}_${device}.h>
 
     #ifndef ${vendor}_${device}${index}_h
     #define ${vendor}_${device}${index}_h
@@ -303,13 +218,12 @@ METAL_DEV_HDR_TMPL = \
     """
 
 
-def generate_metal_dev_hdr(vendor, device, index, base_address, reglist):
+def generate_metal_dev_hdr(vendor, device, index, reglist):
     """
 
     :param vendor: The name of the vendor creating the device
     :param device: the name of the device created.
     :param index: the index of the device
-    :param base_address: the base memory address of the device
     :param reglist: the list of registers for the device
     :return: a string which is the .h for file the device driver
     """
@@ -320,7 +234,7 @@ def generate_metal_dev_hdr(vendor, device, index, base_address, reglist):
         device=device,
         cap_device=device.upper(),
         index=str(index),
-        base_address=hex(base_address),
+        #base_address=hex(base_address),
         vtable=generate_vtable_declarations(device, reglist),
         metal_device=generate_metal_vtable_definition(device),
         protos=generate_protos(device, reglist)
@@ -501,16 +415,15 @@ def handle_args():
         "-o",
         "--object-model",
         type=argparse.FileType('r'),
-        help="The pat to the object model file",
-        required=True,
+        help="The path to the object model file",
     )
 
     parser.add_argument(
         "-d",
         "--duh-document",
         type=argparse.FileType('r'),
-        help="The pathe to the DUH document",
-        required=True,
+        help="The path to the DUH document",
+        required=True
     )
 
     parser.add_argument(
@@ -535,6 +448,15 @@ def handle_args():
     )
 
     parser.add_argument(
+        "-b",
+        "--bsp-dir",
+        help="The path to the bsp directory",
+        type=Path,
+        required=True,
+    )
+
+
+    parser.add_argument(
         "-x",
         "--overwrite-existing",
         action="store_true",
@@ -544,93 +466,135 @@ def handle_args():
 
     parser.add_argument(
         "-H",
-        "--base-header-only",
+        "--base-header",
         action="store_true",
         default=False,
-        help="Create only base header file, not drivers"
+        help="Create base header file. Require Object Model File."
+    )
+
+    parser.add_argument(
+        "-I",
+        "--basic-drivers",
+        action="store_true",
+        default=False,
+        help="Create basic driver files. Requires DUH Document"
     )
 
     return parser.parse_args()
 
 
-def main():
+def main() -> int:
     """
-
     :return: exits 0 on success, 1 on failure
     """
-
+    # ###
     # parse args
+    # ###
+
     args = handle_args()
 
-    object_model = json.load(args.object_model)
+    create_base_header = args.base_header
+    if create_base_header:
+        if not args.object_model:
+            print("Need an object model file to create base header",
+                  file=sys.stderr)
+            return 1
+
+        if not args.bsp_dir:
+            print("Need a BSP directory to create base header",
+                  file = sys.stderr)
+            return 1
+
+        object_model = json.load(args.object_model)
+        bsp_dir_path = args.bsp_dir
+    else:
+        object_model = None
+        bsp_dir_path = None
+
+    create_basic_drivers = args.basic_drivers
     duh_info = json5.load(args.duh_document)
+
     vendor = args.vendor
     device = args.device
     m_dir_path = args.metal_dir
     overwrite_existing = args.overwrite_existing
-    base_header_only = args.base_header_only
 
+    # ###
     # process register info from duh
-    addr_blocks = [i['addressBlocks'][0] for i in
-                   find_component(duh_info, 'addressBlocks')]
+    # ###
 
-    regs = addr_blocks[0]['registers']
+    def interpret_register(a_reg: dict) -> Register:
+        name = a_reg['name']
+        offset = a_reg['addressOffset'] // 8
+        width = a_reg['size']
+        return Register.make_register(name, offset, width)
 
-    reglist: t.List[Register] = []
-    for a_reg in regs:
-        name: str = a_reg['name']
-        offset: int = a_reg['addressOffset'] // 8
-        width: int = a_reg['size']
-        if width not in (8, 16, 32, 64):
-            raise Exception(f'Invalid register width {width}, for register '
-                            f'{name}.\n'
-                            f'Width should be not 8, 16, 32, or 64.\n'
-                            f'Please fix the register width in DUH document.')
+    p = walk(duh_info)
+    p = filter(lambda x: 'name' in x and x['name'] == 'csrAddressBlock', p)
+    p = map(lambda x: x['registers'], p)
+    p = (j for i in p for j in i)  # flatten
+    reglist: t.List[Register] = list(map(interpret_register, p))
 
-        reglist.append(Register(name, offset, width))
-
+    # ###
     # parse OM to find base address of all devices
-    memory_regions = find_json_field_name(object_model, '_types', 'OMMemoryRegion')
-    devices_addr = find_json_field_name(memory_regions, 'name', f'{device}.*')
-    devices_addr_enumerated = list(enumerate(devices_addr))
+    # ###
+    if create_base_header:
+        p = walk(object_model)
+        p = filter(lambda x: '_types' in x, p)
+        p = filter(lambda x: 'OMMemoryRegion' in x['_types'], p)
+        p = filter(lambda x: 'name' in x, p)
+        p = filter(lambda x: x['name'].startswith(device), p)
+        devices_addr_enumerated = enumerate(p)
+    else:
+        devices_addr_enumerated = None
 
-    m_hdr_path = m_dir_path / device
 
-    m_hdr_path.mkdir(exist_ok=True, parents=True)
+    # ###
+    # Base Headers
+    # ###
 
-    for index, om in devices_addr_enumerated:
-        base = om['addressSets'][0]['base']
-
-        # use index 0 for operation to only run once
-        if index == 0:
-            if not base_header_only:
-                driver_file_path = m_dir_path / f'{vendor}_{device}.c'
-                if driver_file_path.exists() or overwrite_existing:
-                    driver_file_path.write_text(
-                        generate_metal_dev_drv(vendor, device, index, reglist))
+    if create_base_header:
+        base_hdr_path = bsp_dir_path / f'bsp_{device}'
+        base_hdr_path.mkdir(exist_ok=True, parents=True)
+        for index, om in devices_addr_enumerated:
+            base = om['addressSets'][0]['base']
+            print(base)
+            if create_base_header:
+                base_header_file_path = base_hdr_path / f'{vendor}_{device}.h'
+                if  overwrite_existing or not base_header_file_path.exists():
+                    base_header_file_path.write_text(
+                        generate_base_hdr(vendor, device, base, reglist)
+                    )
                 else:
-                    print(f"{str(driver_file_path)} exists, not creating.",
+                    print(f"{str(base_header_file_path)} exists, not creating.",
                           file=sys.stderr)
 
-            base_header_path = m_hdr_path / f'{vendor}_{device}.h'
-            if not base_header_path.exists() and overwrite_existing:
-                base_header_path.write_text(
-                    generate_base_hdr(vendor, device, base, reglist)
-                )
-            else:
-                print(f"{str(base_header_path)} exists, not creating.",
-                      file=sys.stderr)
+    # ###
+    # basic drivers
+    # ###
 
-        if not base_header_only:
-            header_file_path = m_hdr_path / f'{vendor}_{device}{index}.h'
-            if not base_header_only and \
-                    not header_file_path.exists() or overwrite_existing:
-                header_file_path.write_text(
-                    generate_metal_dev_hdr(vendor, device, index, base, reglist))
-            else:
-                print(f"{str(header_file_path)} exists, not creating.",
-                      file=sys.stderr)
+    if create_basic_drivers:
+        m_hdr_path = m_dir_path / device
+        m_hdr_path.mkdir(exist_ok=True, parents=True)
 
+        driver_file_path = m_dir_path / f'{vendor}_{device}.c'
+        header_file_path = m_hdr_path / f'{vendor}_{device}{0}.h'
+
+        if overwrite_existing or not driver_file_path.exists():
+            driver_file_path.write_text(
+                generate_metal_dev_drv(vendor, device, 0, reglist))
+        else:
+            print(f"{str(driver_file_path)} exists, not creating.",
+                  file=sys.stderr)
+
+        if overwrite_existing or  not header_file_path.exists():
+            header_file_path.write_text(
+                generate_metal_dev_hdr(vendor, device, 0, reglist))
+        else:
+            print(f"{str(header_file_path)} exists, not creating.",
+                  file=sys.stderr)
+
+    return 0
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
