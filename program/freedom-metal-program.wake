@@ -183,7 +183,20 @@ global def freedomMetalDUTProgramCompiler =
       dut.getDUTObjectModel
       | prettyJSON
       | write "build/api-generator-sifive/{dut.getDUTName}/programs/omfile.json"
-    def driverFiles =  createBasicDriverWithOMFile dut.getDUTName omFile
+
+    # collect generated/published driver sources
+    def driverHeaderFiles = createBasicDriversForDUT dut
+    def driverImpFiles = getDriverImplementationsForDUT dut
+    def driverCFiles =
+      mapFlat getDriverImplementationSources driverImpFiles
+      ++ mapFlat getDriverOutputCFiles driverHeaderFiles
+      | distinctBy (scmp _.getPathName _.getPathName)
+    def driverIncludes =
+      driverHeaderFiles
+      | mapFlat getDriverOutputIncludeDirs
+      | map simplify
+      | distinctBy scmp
+
     def outputDir = programCompileOptions.getProgramCompileOptionsOutputDir
     def installDir = "build/freedom-metal/{dut.getDUTName}"
     def metalInstall =
@@ -192,10 +205,9 @@ global def freedomMetalDUTProgramCompiler =
     def gccProgramPlan =
       def outputFile = "{outputDir}/{programCompileOptions.getProgramCompileOptionsName}.elf"
       def newCFiles =
-        driverFiles.getDriverOutputCFiles ++
-        programCompileOptions.getProgramCompileOptionsCFiles
+        driverCFiles ++ programCompileOptions.getProgramCompileOptionsCFiles
       def newIncludes =
-        driverFiles.getDriverOutputIncludeDirs ++
+        driverIncludes ++
         programCompileOptions.getProgramCompileOptionsIncludeDirs
       def newCompileOptions =
         programCompileOptions

@@ -1,3 +1,30 @@
+tuple DriverImplementation =
+  global IsCompatible: List String
+  global Sources:      List Path
+
+global def makeDriverImplementation compatibleDevices driverSources =
+  DriverImplementation compatibleDevices driverSources
+
+target driverImpCompatibilityTrees Unit =
+  subscribe driverImplementations
+  | map (\p p → listToTree scmp p.getDriverImplementationIsCompatible)
+
+target getCompatibleDriverImplementation compatibleString =
+  driverImpCompatibilityTrees Unit
+  | filter (compatibleString ∈ _.getPairSecond)
+  | head
+  | omap getPairFirst
+
+global def getDriverImplementationsForDUT dut =
+  def dts = dut.getDUTDTS
+  def omFile = dut.getDUTObjectModelFile
+  def compatibleLists = Nil
+  def getImpForCompatibleList compatibleList =
+    compatibleList
+    | mapPartial getCompatibleDriverImplementation
+    | head
+  mapPartial getImpForCompatibleList compatibleLists
+
 
 tuple BasicDriverPlan =
   global DUHDocument:         Path
@@ -6,6 +33,7 @@ tuple BasicDriverPlan =
   global DeviceName:          String
   global LocalMetalDirectory: String
   global BSPDirectory:        String
+  global IsCompatible:        List String
   global DUTName:             String
   global OverwriteExisting:   Boolean
   global BaseHeader:          Boolean
@@ -17,18 +45,22 @@ tuple BasicDriverPlan =
 # VendorName => the vendor name used for the device
 # DeviceName => the name of the device
 # LocalMetalDirectory => the metal/drivers directory in the device's repository
-global def makeBasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory bspDirectory dutName =
-  BasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory bspDirectory dutName True True True
+global def makeBasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory bspDirectory compat dutName =
+  BasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory bspDirectory compat dutName True True True
+
+# memoize this because trees in wake are slow
+target basicDriverCompatibilityTrees Unit =
+  subscribe basicDriverPlans
+  | map (\p p → listToTree scmp p.getBasicDriverPlanIsCompatible)
 
 # This function provides an external interface through the publish/subscribe
 # variable 'basicDriverPlans' If you want automatic basic driver creation,
 # create a BasicDriverPlan using makeBasicDriverPlan, Then build the drivers
 # by calling createBasicDriver
-def getDevicePlan dutName =
-  def plans = subscribe basicDriverPlans
-  def samePlan aPlan =
-    aPlan.getBasicDriverPlanDUTName ==~ dutName
-  find samePlan plans
+target getCompatibleDevicePlan compatibleString =
+  basicDriverCompatibilityTrees Unit
+  | filter (compatibleString ∈ _.getPairSecond)
+  | head
   | omap getPairFirst
 
 def basicPlanToPlan basicDriverPlan =
@@ -94,18 +126,30 @@ def makeBasicDrivers basicDriverPlan =
   | getJobOutputs
   | makeDriverOutput basicDriverPlan
 
-# External wake target to create basic drivers
-# deviceName => the name of the DUT plan
-global def createBasicDriver dutPlanName =
-  getDevicePlan dutPlanName
-  | omap makeBasicDrivers
 
+
+target getCompatibleLists dts =
+  dts
+  | read
+  | getWhenFail ""
+  | tokenize `\n`
+  | mapFlat `\s*(compatible\s*=\s*"")`.extract
 # wake target to create basic drivers from internal code where
 # omfile is generated
 # deviceName => the name of the DUT Plan
-global def createBasicDriverWithOMFile dutPlanName omfile =
-  def omfileArg _ = omfile
-  getDevicePlan dutPlanName
-  | omap (setBasicDriverPlanOMFile omfileArg)
-  | omap makeBasicDrivers
-  | getOrElse (DriverOutput Nil Nil)
+global def createBasicDriversForDUT dut =
+  def dts = dut.getDUTDTS
+  def omFile = dut.getDUTObjectModelFile
+  def compatibleLists = Nil
+  def getDeviceForCompatibleList compatibleList =
+    compatibleList
+    | mapPartial getCompatibleDevicePlan
+    | head
+
+  compatibleLists
+  | mapPartial getDeviceForCompatibleList
+  | map (
+    _
+    | setBasicDriverPlanOMFile (\_ omFile)
+    | makeBasicDrivers
+  )
