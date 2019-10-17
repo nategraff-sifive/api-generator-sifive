@@ -179,11 +179,6 @@ global def freedomMetalDUTProgramCompiler =
   def score        = (\_ \_ 1.0) # TODO
 
   def imp dut programCompileOptions =
-    def omFile =
-      dut.getDUTObjectModel
-      | prettyJSON
-      | write "build/api-generator-sifive/{dut.getDUTName}/programs/omfile.json"
-
     # collect generated/published driver sources
     def driverHeaderFiles = createBasicDriversForDUT dut
     def driverImpFiles = getDriverImplementationsForDUT dut

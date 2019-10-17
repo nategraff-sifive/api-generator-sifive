@@ -10,15 +10,40 @@ target driverImpCompatibilityTrees Unit =
   | map (\p p → listToTree scmp p.getDriverImplementationIsCompatible)
 
 target getCompatibleDriverImplementation compatibleString =
-  driverImpCompatibilityTrees Unit
-  | filter (compatibleString ∈ _.getPairSecond)
-  | head
-  | omap getPairFirst
+  def drivers = filter (compatibleString ∈ _.getPairSecond) Unit.driverImpCompatibilityTrees
+  match drivers
+    one, Nil = Some one.getPairFirst
+    Nil = None
+    _ =
+      def _ = printlnLevel logWarn "WARNING: More than one driver implementation available for device {compatibleString}. A random one will be chosen."
+      None
+
+global target getCompatibleLists dtsJSON =
+  def isDevice = match _
+    JObject fields = exists (matches `compatible` _.getPairFirst) fields
+    _ = False
+  def getLists =
+    _
+    | getJArray
+    | getOrElse Nil
+    | mapPartial (getJArray)
+  match dtsJSON.parseJSONFile
+    Pass dtsJValue =
+      dtsJValue
+      | (_ /../ isDevice)
+      | getJArray
+      | getOrElse Nil
+      | map (_ // `compatible`)
+      | mapPartial getJArray
+      | map getJString.mapPartial
+    Fail e =
+      def _ = printlnLevel logWarn "WARNING: Could not parse DTS JSON: {e.getErrorCause}"
+      Nil
 
 global def getDriverImplementationsForDUT dut =
   def dts = dut.getDUTDTS
   def omFile = dut.getDUTObjectModelFile
-  def compatibleLists = Nil
+  def compatibleLists = getCompatibleLists dut.getDUTDTSJSON
   def getImpForCompatibleList compatibleList =
     compatibleList
     | mapPartial getCompatibleDriverImplementation
@@ -126,14 +151,6 @@ def makeBasicDrivers basicDriverPlan =
   | getJobOutputs
   | makeDriverOutput basicDriverPlan
 
-
-
-target getCompatibleLists dts =
-  dts
-  | read
-  | getWhenFail ""
-  | tokenize `\n`
-  | mapFlat `\s*(compatible\s*=\s*"")`.extract
 # wake target to create basic drivers from internal code where
 # omfile is generated
 # deviceName => the name of the DUT Plan
