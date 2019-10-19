@@ -1,0 +1,119 @@
+tuple BasicDriverPlan =
+  global DUHDocument:         Path
+  global OMFile:              Unit => Path
+  global VendorName:          String
+  global DeviceName:          String
+  global LocalMetalDirectory: String
+  global BSPDirectory:        String
+  global IsCompatible:        List String
+  global DUTName:             String
+  global OverwriteExisting:   Boolean
+  global BaseHeader:          Boolean
+  global BasicDrivers:        Boolean
+
+# create a BasicDriverPlan
+# duhFile => path to your duh file (device.json5)
+# OMFile => a function to produce the OMFile, takes Unit as an arg
+# VendorName => the vendor name used for the device
+# DeviceName => the name of the device
+# LocalMetalDirectory => the metal/drivers directory in the device's repository
+global def makeBasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory bspDirectory compat dutName =
+  BasicDriverPlan duhFile omFile vendorName deviceName localMetalDirectory bspDirectory compat dutName True True True
+
+# memoize this because trees in wake are slow
+target basicDriverCompatibilityTrees Unit =
+  subscribe basicDriverPlans
+  | map (\p p → listToTree scmp p.getBasicDriverPlanIsCompatible)
+
+# This function provides an external interface through the publish/subscribe
+# variable 'basicDriverPlans' If you want automatic basic driver creation,
+# create a BasicDriverPlan using makeBasicDriverPlan, Then build the drivers
+# by calling createBasicDriver
+target getCompatibleDevicePlan compatibleString =
+  basicDriverCompatibilityTrees Unit
+  | filter (compatibleString ∈ _.getPairSecond)
+  | head
+  | omap getPairFirst
+
+def basicPlanToPlan basicDriverPlan =
+  def omfile = basicDriverPlan.getBasicDriverPlanOMFile Unit
+  def extraFlags =
+    def overwrite =
+      if basicDriverPlan.getBasicDriverPlanOverwriteExisting
+      then "--overwrite-existing", Nil
+      else Nil
+    def baseHeader =
+      if basicDriverPlan.getBasicDriverPlanBaseHeader
+      then "--base-header", Nil
+      else Nil
+    def basicDrivers =
+      if basicDriverPlan.getBasicDriverPlanBasicDrivers
+      then "--basic-drivers", Nil
+      else Nil
+    overwrite ++ baseHeader ++ basicDrivers
+  def cmd =
+    "{here}/../scripts/generate_drivers.py".simplify,
+    "--object-model",
+    omfile.getPathName,
+    "--duh-document",
+    basicDriverPlan.getBasicDriverPlanDUHDocument.getPathName,
+    "--vendor",
+    basicDriverPlan.getBasicDriverPlanVendorName,
+    "--device",
+    basicDriverPlan.getBasicDriverPlanDeviceName,
+    "--metal-dir",
+    basicDriverPlan.getBasicDriverPlanLocalMetalDirectory,
+    "--bsp-dir",
+    basicDriverPlan.getBasicDriverPlanBSPDirectory,
+    extraFlags
+  def visibleFiles =
+    "{here}/../scripts/generate_drivers.py".simplify.source,
+    basicDriverPlan.getBasicDriverPlanDUHDocument,
+    omfile,
+    basicDriverPlan.getBasicDriverPlanLocalMetalDirectory.source,
+    Nil
+  makePlan cmd visibleFiles
+  | addPythonEnv ("{here}/../scripts/generate_drivers_env".simplify)
+
+tuple DriverOutput =
+  global CFiles:      List Path
+  global IncludeDirs: List String
+
+def makeDriverOutput basicDriverPlan jobOutputs =
+  def ifPathCFile path =
+    path.getPathName
+    | matches `.*\.[c,h]`
+  def cFiles = filter ifPathCFile jobOutputs
+  def metalDir = basicDriverPlan.getBasicDriverPlanLocalMetalDirectory
+  def includeDirs =
+    metalDir,
+    basicDriverPlan.getBasicDriverPlanBSPDirectory,
+    Nil
+  DriverOutput cFiles includeDirs
+
+
+def makeBasicDrivers basicDriverPlan =
+  basicPlanToPlan basicDriverPlan
+  | runJob
+  | getJobOutputs
+  | makeDriverOutput basicDriverPlan
+
+# wake target to create basic drivers from internal code where
+# omfile is generated
+# deviceName => the name of the DUT Plan
+global def createBasicDriversForDUT dut =
+  def dts = dut.getDUTDTS
+  def omFile = dut.getDUTObjectModelFile
+  def compatibleLists = Nil
+  def getDeviceForCompatibleList compatibleList =
+    compatibleList
+    | mapPartial getCompatibleDevicePlan
+    | head
+
+  compatibleLists
+  | mapPartial getDeviceForCompatibleList
+  | map (
+    _
+    | setBasicDriverPlanOMFile (\_ omFile)
+    | makeBasicDrivers
+  )
