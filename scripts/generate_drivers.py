@@ -1,7 +1,6 @@
 #!/usr/bin/env python3.7
 
 import argparse
-import json
 import string
 import sys
 import textwrap
@@ -10,10 +9,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import json5
-
-###
-# JSON support
-###
 
 PlainJSONType = t.Union[dict, list, t.AnyStr, float, bool]
 JSONType = t.Union[PlainJSONType, t.Iterator[PlainJSONType]]
@@ -59,7 +54,6 @@ class Register:
 ###
 # templates
 ###
-
 def generate_vtable_declarations(device_name: str,
                                  reg_list: t.List[Register]) -> str:
     """
@@ -97,7 +91,7 @@ def generate_metal_vtable_definition(devices_name: str) -> str:
     """
 
     return f'    uint32_t *{devices_name}_base;\n' + \
-           f'    const struct metal_{devices_name}_vtable vtable;'
+           f'    struct metal_{devices_name}_vtable vtable;'
 
 
 def generate_protos(device_name: str, reg_list: t.List[Register]) -> str:
@@ -130,65 +124,6 @@ def generate_protos(device_name: str, reg_list: t.List[Register]) -> str:
     return '\n'.join(rv)
 
 
-###
-# templates
-###
-
-METAL_BASE_HDR_TMPL = \
-    """
-    #include <metal/compiler.h>
-    #include <metal/io.h>
-
-    #ifndef ${vendor}_${device}_h
-    #define ${vendor}_${device}_h
-    #define ${cap_device}_BASE ${base_address}
-
-    // : these macros have control_base as a hidden input
-    #define METAL_${cap_device}_REG(offset) (((unsigned long)control_base + offset))
-    #define METAL_${cap_device}_REGW(offset) \\
-       (__METAL_ACCESS_ONCE((__metal_io_u32 *)METAL_${cap_device}_REG(offset)))
-
-    ${register_offsets}
-
-    #endif
-    """
-
-
-def generate_offsets(device_name: str, reg_list: t.List[Register]) -> str:
-    """
-    Generate the register offset macros
-
-    :param device_name: the name of the device
-    :param reg_list: the list of registers for the device.
-    :return:The offset c macros for the device and registers
-    """
-    rv: t.List[str] = []
-
-    cap_device = device_name.upper()
-    for a_reg in reg_list:
-        name = a_reg.name.upper()
-        offset = a_reg.offset
-        macro_line = f'#define METAL_{cap_device}_{name} {offset}'
-        rv.append(macro_line)
-
-    return '\n'.join(rv)
-
-
-def generate_base_hdr(vendor: str,
-                      device: str,
-                      base_address: int,
-                      reglist: t.List[Register]):
-    template = string.Template(textwrap.dedent(METAL_BASE_HDR_TMPL))
-
-    return template.substitute(
-        base_address=hex(base_address),
-        vendor=vendor,
-        device=device,
-        cap_device=device.upper(),
-        register_offsets=generate_offsets(device, reglist)
-    )
-
-
 # The template for the .h file
 
 METAL_DEV_HDR_TMPL = \
@@ -211,8 +146,8 @@ METAL_DEV_HDR_TMPL = \
     ${metal_device}
     };
 
-    __METAL_DECLARE_VTABLE(metal_${device})
-
+    //__METAL_DECLARE_VTABLE(metal_${device})
+        
     ${protos}
     #endif
     """
@@ -234,7 +169,7 @@ def generate_metal_dev_hdr(vendor, device, index, reglist):
         device=device,
         cap_device=device.upper(),
         index=str(index),
-        #base_address=hex(base_address),
+        # base_address=hex(base_address),
         vtable=generate_vtable_declarations(device, reglist),
         metal_device=generate_metal_vtable_definition(device),
         protos=generate_protos(device, reglist)
@@ -255,15 +190,31 @@ METAL_DEV_DRV_TMPL = \
 
     ${metal_functions}
 
-    __METAL_DEFINE_VTABLE(metal_${device}) = {
-    ${def_vtable}
-    };
+    struct metal_${device} metal_${device}s[${cap_device}_COUNT];
+    
+    struct metal_${device}* ${device}_tables[${cap_device}_COUNT];
+    uint8_t ${device}_tables_cnt = ${cap_device}_COUNT;
 
-    const struct metal_${device}* ${device}_tables[] = {&metal_${device}};
-    uint8_t ${device}_tables_cnt = 1;
+    void init_devices()
+    {
+        uint32_t bases[]=${cap_device}_BASES;
+        int i;
+        
+        for (i = 0; i < ${cap_device}_COUNT; i++){
+            ${def_vtable}
+            ${device}_tables[i] = &metal_${device}s[i];
+        }
+    }
 
     const struct metal_${device}* get_metal_${device}(uint8_t idx)
     {
+        static uint8_t initted = 0;
+        
+        if (!initted){
+            init_devices();
+            initted = 1;
+        }
+        
         if (idx >= ${device}_tables_cnt)
             return NULL;
         return ${device}_tables[idx];
@@ -281,15 +232,12 @@ def generate_def_vtable(device: str, reg_list: t.List[Register]) -> str:
     """
     rv: t.List[str] = []
     cap_device = device.upper()
-    head = f'    .{device}_base = (uint32_t *){cap_device}_BASE,'
+    head = f'metal_{device}s[i].{device}_base = bases[i];'
     rv.append(head)
     for a_reg in reg_list:
         reg_name = a_reg.name.lower()
-
-        write_func = f'    .vtable.v_{device}_{reg_name}_write ' \
-                     f'= {device}_{reg_name}_write,'
-        read_func = f'    .vtable.v_{device}_{reg_name}_read ' \
-                    f'= {device}_{reg_name}_read,'
+        write_func = f'{" " * 8}metal_{device}s[i].vtable.v_{device}_{reg_name}_write = {device}_{reg_name}_write;'
+        read_func = f'{" " * 8}metal_{device}s[i].vtable.v_{device}_{reg_name}_read = {device}_{reg_name}_read;'
         rv.append(write_func)
         rv.append(read_func)
 
@@ -393,11 +341,19 @@ def generate_metal_dev_drv(vendor, device, index, reglist):
         device=device,
         cap_device=device.upper(),
         index=str(index),
-        offsets=generate_offsets(device, reglist),
         base_functions=generate_base_functions(device, reglist),
         metal_functions=generate_metal_function(device, reglist),
         def_vtable=generate_def_vtable(device, reglist)
     )
+
+
+# ###
+# Support for parsing duh file
+# ###
+
+def walkfile_j5(f_name: str) -> JSONType:
+    "Returns iterator over named json5 file"
+    return walk(json5.load(open(f_name)))
 
 
 ###
@@ -412,16 +368,8 @@ def handle_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "-o",
-        "--object-model",
-        type=argparse.FileType('r'),
-        help="The path to the object model file",
-    )
-
-    parser.add_argument(
         "-d",
         "--duh-document",
-        type=argparse.FileType('r'),
         help="The path to the DUH document",
         required=True
     )
@@ -448,15 +396,6 @@ def handle_args():
     )
 
     parser.add_argument(
-        "-b",
-        "--bsp-dir",
-        help="The path to the bsp directory",
-        type=Path,
-        required=True,
-    )
-
-
-    parser.add_argument(
         "-x",
         "--overwrite-existing",
         action="store_true",
@@ -464,69 +403,44 @@ def handle_args():
         help="overwrite existing files"
     )
 
-    parser.add_argument(
-        "-H",
-        "--base-header",
-        action="store_true",
-        default=False,
-        help="Create base header file. Require Object Model File."
-    )
-
-    parser.add_argument(
-        "-I",
-        "--basic-drivers",
-        action="store_true",
-        default=False,
-        help="Create basic driver files. Requires DUH Document"
-    )
-
     return parser.parse_args()
 
 
-def main() -> int:
-    """
-    :return: exits 0 on success, 1 on failure
-    """
-    # ###
-    # parse args
-    # ###
-
+def main():
     args = handle_args()
-
-    create_base_header = args.base_header
-    if create_base_header:
-        if not args.object_model:
-            print("Need an object model file to create base header",
-                  file=sys.stderr)
-            return 1
-
-        if not args.bsp_dir:
-            print("Need a BSP directory to create base header",
-                  file = sys.stderr)
-            return 1
-
-        object_model = json.load(args.object_model)
-        bsp_dir_path = args.bsp_dir
-    else:
-        object_model = None
-        bsp_dir_path = None
-
-    create_basic_drivers = args.basic_drivers
-    duh_info = json5.load(args.duh_document)
 
     vendor = args.vendor
     device = args.device
     m_dir_path = args.metal_dir
     overwrite_existing = args.overwrite_existing
 
+    duh_info = json5.load(open(args.duh_document))
+
+    # ###
+    # process pSchema (in duh document) to create symbol table
+    # ###
+    p = walkfile_j5(args.duh_document)
+    p = filter(lambda x: 'pSchema' in x, p)
+    p = map(lambda x: x['pSchema'], p)
+    p = filter(lambda x: 'properties' in x, p)
+    p = map(lambda x: x['properties'], p)
+
+    duh_symbol_table = {}
+
+    for prop in p:
+        duh_symbol_table.update(**prop)
+
     # ###
     # process register info from duh
     # ###
-
     def interpret_register(a_reg: dict) -> Register:
         name = a_reg['name']
         offset = a_reg['addressOffset'] // 8
         width = a_reg['size']
+        if isinstance(offset, str):
+            offset = duh_symbol_table[offset]['default']
+        if isinstance(width, str):
+            width = duh_symbol_table[width]['default']
         return Register.make_register(name, offset, width)
 
     p = walk(duh_info)
@@ -535,66 +449,28 @@ def main() -> int:
     p = (j for i in p for j in i)  # flatten
     reglist: t.List[Register] = list(map(interpret_register, p))
 
-    # ###
-    # parse OM to find base address of all devices
-    # ###
-    if create_base_header:
-        p = walk(object_model)
-        p = filter(lambda x: '_types' in x, p)
-        p = filter(lambda x: 'OMMemoryRegion' in x['_types'], p)
-        p = filter(lambda x: 'name' in x, p)
-        p = filter(lambda x: x['name'].startswith(device), p)
-        devices_addr_enumerated = enumerate(p)
+    m_hdr_path = m_dir_path / device
+    m_hdr_path.mkdir(exist_ok=True, parents=True)
+
+    driver_file_path = m_dir_path / f'{vendor}_{device}.c'
+    header_file_path = m_hdr_path / f'{vendor}_{device}{0}.h'
+
+    if overwrite_existing or not driver_file_path.exists():
+        driver_file_path.write_text(
+            generate_metal_dev_drv(vendor, device, 0, reglist))
     else:
-        devices_addr_enumerated = None
+        print(f"{str(driver_file_path)} exists, not creating.",
+              file=sys.stderr)
 
-
-    # ###
-    # Base Headers
-    # ###
-
-    if create_base_header:
-        base_hdr_path = bsp_dir_path / f'bsp_{device}'
-        base_hdr_path.mkdir(exist_ok=True, parents=True)
-        for index, om in devices_addr_enumerated:
-            base = om['addressSets'][0]['base']
-            print(base)
-            if create_base_header:
-                base_header_file_path = base_hdr_path / f'{vendor}_{device}.h'
-                if  overwrite_existing or not base_header_file_path.exists():
-                    base_header_file_path.write_text(
-                        generate_base_hdr(vendor, device, base, reglist)
-                    )
-                else:
-                    print(f"{str(base_header_file_path)} exists, not creating.",
-                          file=sys.stderr)
-
-    # ###
-    # basic drivers
-    # ###
-
-    if create_basic_drivers:
-        m_hdr_path = m_dir_path / device
-        m_hdr_path.mkdir(exist_ok=True, parents=True)
-
-        driver_file_path = m_dir_path / f'{vendor}_{device}.c'
-        header_file_path = m_hdr_path / f'{vendor}_{device}{0}.h'
-
-        if overwrite_existing or not driver_file_path.exists():
-            driver_file_path.write_text(
-                generate_metal_dev_drv(vendor, device, 0, reglist))
-        else:
-            print(f"{str(driver_file_path)} exists, not creating.",
-                  file=sys.stderr)
-
-        if overwrite_existing or  not header_file_path.exists():
-            header_file_path.write_text(
-                generate_metal_dev_hdr(vendor, device, 0, reglist))
-        else:
-            print(f"{str(header_file_path)} exists, not creating.",
-                  file=sys.stderr)
+    if overwrite_existing or not header_file_path.exists():
+        header_file_path.write_text(
+            generate_metal_dev_hdr(vendor, device, 0, reglist))
+    else:
+        print(f"{str(header_file_path)} exists, not creating.",
+              file=sys.stderr)
 
     return 0
+
 
 if __name__ == '__main__':
     sys.exit(main())
