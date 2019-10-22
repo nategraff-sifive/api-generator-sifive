@@ -275,14 +275,8 @@ def main() -> int:
     p = filter(lambda x: f'OM{device}' in x['_types'], p)
 
     reglist: t.List[Register] = []
-    base = 0
     bases = []
     for index, dev in enumerate(p):
-        # 0 width
-        device_width = dev['width']
-        # 1 eventually get interrupts here
-        # (dev['interrupts'])
-
         for m_idx, mr in enumerate(dev['memoryRegions']):
             # get base address for each memory region
 
@@ -314,6 +308,7 @@ def main() -> int:
               file=sys.stderr)
 
     return 0
+
 
 if __name__ == '__main__':
     sys.exit(main())

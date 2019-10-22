@@ -231,7 +231,6 @@ def generate_def_vtable(device: str, reg_list: t.List[Register]) -> str:
     :return: the declarations in the vtable for the driver .c file
     """
     rv: t.List[str] = []
-    cap_device = device.upper()
     head = f'metal_{device}s[i].{device}_base = bases[i];'
     rv.append(head)
     for a_reg in reg_list:
