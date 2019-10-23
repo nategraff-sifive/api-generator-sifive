@@ -1,3 +1,7 @@
+# This file creates a design specific c header file.
+# It inclues base addresses for memory regions, register offsets
+# and register widths.
+
 tuple BaseHeaderPlan =
   global Vendor:            String
   global Device:            String
@@ -10,16 +14,10 @@ tuple DriverOutput =
   global IncludeDirs: List String
   global Sources:     List Path
 
-# create a BasicDriverPlan
-# duhFile => path to your duh file (device.json5)
-# OMFile => a function to produce the OMFile, takes Unit as an arg
-# VendorName => the vendor name used for the device
-# DeviceName => the name of the device
-# LocalMetalDirectory => the metal/drivers directory in the device's repository
 global def makeBaseHeaderPlan vendorName deviceName omFile outputDir =
   BaseHeaderPlan vendorName deviceName omFile outputDir True
 
-global def makeBaseHeader plan =
+global def generateBaseHeader plan =
   def omfile = plan.getBaseHeaderPlanOMFile
   def outputDir = plan.getBaseHeaderPlanOutputDir
   def extraFlags =

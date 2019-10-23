@@ -181,7 +181,7 @@ global def freedomMetalDUTProgramCompiler =
   def imp dut programCompileOptions =
     # collect generated/published driver sources
     def driverImpFiles = getDriverImplementationsForDUT dut
-    def baseHeaderFiles = getBasicHeadersForDUT dut outputDir
+    def baseHeaderFiles = getBaseHeaderForDUT dut outputDir
     def driverCFiles =
       mapFlat getDriverImplementationCFiles driverImpFiles
       ++ mapFlat getDriverOutputCFiles baseHeaderFiles
@@ -192,7 +192,7 @@ global def freedomMetalDUTProgramCompiler =
       | map simplify
       | distinctBy scmp
     def driverSources =
-      mapFlat getDriverImplementationSources driverImpFiles
+      mapFlat getDriverImplementationVisible driverImpFiles
       ++ mapFlat getDriverOutputSources baseHeaderFiles
       | distinctBy (scmp _.getPathName _.getPathName)
 
