@@ -21,8 +21,8 @@ tuple DriverImplementation =
   global IncludeDirs:  List String
   global Sources:      List Path
 
-global def makeDriverImplementation compatibleDevices driverSources includeDirs =
-  DriverImplementation compatibleDevices driverSources includeDirs
+global def makeDriverImplementation compatibleDevices vendor device driverSources includeDirs sources=
+  DriverImplementation compatibleDevices vendor device driverSources includeDirs sources
 
 target driverImpCompatibilityTrees Unit =
   subscribe driverImplementations
