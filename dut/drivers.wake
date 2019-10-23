@@ -15,8 +15,11 @@ def jfind filterFn root =
 
 tuple DriverImplementation =
   global IsCompatible: List String
-  global Sources:      List Path
+  global Vendor:       String
+  global Device:       String
+  global CFiles:       List Path
   global IncludeDirs:  List String
+  global Sources:      List Path
 
 global def makeDriverImplementation compatibleDevices driverSources includeDirs =
   DriverImplementation compatibleDevices driverSources includeDirs
@@ -65,3 +68,13 @@ global def getDriverImplementationsForDUT dut =
     | mapPartial getCompatibleDriverImplementation
     | head
   mapPartial getImpForCompatibleList compatibleLists
+
+global def getBasicHeadersForDUT dut outputDir =
+  def omFile = dut.getDUTObjectModelFile
+  def imps = dut.getDriverImplementationsForDUT
+  def generateBaseHeaderForDriver driver =
+    def device = driver.getDriverImplementationDevice
+    def vendor = driver.getDriverImplementationVendor
+    makeBaseHeaderPlan vendor device omFile "{outputDir}/{device}"
+    | makeBaseHeader
+  map generateBaseHeaderForDriver imps

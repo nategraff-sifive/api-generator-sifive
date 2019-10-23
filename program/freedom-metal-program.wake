@@ -181,16 +181,20 @@ global def freedomMetalDUTProgramCompiler =
   def imp dut programCompileOptions =
     # collect generated/published driver sources
     def driverImpFiles = getDriverImplementationsForDUT dut
-    def _ = driverImpFiles | format | println
-    def driverHeaderFiles =
-      mapFlat getDriverImplementationIncludeDirs driverImpFiles
+    def baseHeaderFiles = getBasicHeadersForDUT dut outputDir
     def driverCFiles =
-      mapFlat getDriverImplementationSources driverImpFiles
+      mapFlat getDriverImplementationCFiles driverImpFiles
+      ++ mapFlat getDriverOutputCFiles baseHeaderFiles
       | distinctBy (scmp _.getPathName _.getPathName)
     def driverIncludes =
-      driverHeaderFiles
+      mapFlat getDriverImplementationIncludeDirs driverImpFiles
+      ++ mapFlat getDriverOutputIncludeDirs baseHeaderFiles
       | map simplify
       | distinctBy scmp
+    def driverSources =
+      mapFlat getDriverImplementationSources driverImpFiles
+      ++ mapFlat getDriverOutputSources baseHeaderFiles
+      | distinctBy (scmp _.getPathName _.getPathName)
 
     def outputDir = programCompileOptions.getProgramCompileOptionsOutputDir
     def installDir = "build/freedom-metal/{dut.getDUTName}"
@@ -209,6 +213,7 @@ global def freedomMetalDUTProgramCompiler =
         | setProgramCompileOptionsCFiles newCFiles
         | setProgramCompileOptionsIncludeDirs newIncludes
       programCompileOptionsToGCCProgramPlan outputFile newCompileOptions
+      | setGCCProgramPlanSources driverSources
     def binary =
       def outputFile = "{outputDir}/{programCompileOptions.getProgramCompileOptionsName}.bin"
       metalInstall
