@@ -8,9 +8,12 @@ import textwrap
 import typing as t
 from dataclasses import dataclass
 from pathlib import Path
+from collections import Counter
 
 PlainJSONType = t.Union[dict, list, t.AnyStr, float, bool]
 JSONType = t.Union[PlainJSONType, t.Iterator[PlainJSONType]]
+
+NAME_DICT = Counter()
 
 
 def walk(j_obj: JSONType) -> t.Iterator[JSONType]:
@@ -39,15 +42,12 @@ class Register:
     name: str
     offset: int  # in bytes
     width: int  # in bits
+    group: str
 
     @staticmethod
-    def make_register(name: str, offset: int, width: int) -> "Register":
-        if width not in (8, 16, 32, 64):
-            raise Exception(f'Invalid register width {width}, for register '
-                            f'{name}.\n'
-                            f'Width should be not 8, 16, 32, or 64.\n'
-                            f'Please fix the register width in DUH document.')
-        return Register(name, offset, width)
+    def make_register(name: str, offset: int, width: int, group: str) \
+            -> "Register":
+        return Register(name, offset, width, group)
 
 
 ###
@@ -135,23 +135,31 @@ METAL_BASE_HDR_TMPL = \
 
     #ifndef ${vendor}_${device}_h
     #define ${vendor}_${device}_h
- 
+
     // To use ${cap_device}_BASES, use it as the
     // initializer to an array of ints, i.e.
     // int bases[] = ${cap_device}_BASES;
 
-    #define ${cap_device}_COUNT ${dev_count} 
+    #define ${cap_device}_COUNT ${dev_count}
     #define ${cap_device}_BASES {${base_address}}
-    
+
+    ${interrupts}
 
     // : these macros have control_base as a hidden input
-    #define METAL_${cap_device}_REG(offset) (((unsigned long)control_base + offset))
+    // use with the _BYTE #define's
+    #define METAL_${cap_device}_REG(offset) ((unsigned long)control_base + (offset))
     #define METAL_${cap_device}_REGW(offset) \\
        (__METAL_ACCESS_ONCE((__metal_io_u32 *)METAL_${cap_device}_REG(offset)))
 
+    #define METAL_${cap_device}_REGBW(offset) \\
+       (__METAL_ACCESS_ONCE((uint8_t *)METAL_${cap_device}_REG(offset)))
+
+    // METAL_NAME => bit offset from base
+    // METAL_NAME_BYTE => (uint8_t *) offset from base
+    // METAL_NAME_BIT => number of bits into METAL_NAME_BYTE
+    // METAL_NAME_WIDTH => bit width
+
     ${register_offsets}
-    
-    ${register_widths}
 
     #endif
     """
@@ -169,23 +177,74 @@ def generate_offsets(device_name: str, reg_list: t.List[Register]) -> str:
 
     cap_device = device_name.upper()
     for a_reg in reg_list:
-        name = a_reg.name.upper()
+        if a_reg.name == 'reserved':
+            continue
+        name = a_reg.name.upper().strip().replace(" ", "")
+        group = a_reg.group.upper().strip().replace(" ", "")
         offset = a_reg.offset
-        macro_line = f'#define METAL_{cap_device}_{name} {offset}'
+        width = a_reg.width
+
+        if name.startswith(group.split('_')[-1] + "_"):
+            group = "_".join(group.split('_')[:-1])
+
+        if group is not "":
+            macro_line = f'#define METAL_{cap_device}_{group}_{name} {offset}\n'
+            NAME_DICT[f'METAL_{cap_device}_{group}_{name}'] += 1
+            macro_line += f'#define METAL_{cap_device}_{group}_{name}_BYTE {offset >> 3}\n'
+            macro_line += f'#define METAL_{cap_device}_{group}_{name}_BIT {offset & 0x7}\n'
+            macro_line += f'#define METAL_{cap_device}_{group}_{name}_WIDTH {width}\n'
+        else:
+            macro_line = f'#define METAL_{cap_device}_{name} {offset}\n'
+            NAME_DICT[f'METAL_{cap_device}_{name}'] += 1
+            macro_line += f'#define METAL_{cap_device}_{name}_BYTE {offset >> 3}\n'
+            macro_line += f'#define METAL_{cap_device}_{name}_BIT {offset & 0x7}\n'
+            macro_line += f'#define METAL_{cap_device}_{name}_WIDTH {width}\n'
+
         rv.append(macro_line)
 
     return '\n'.join(rv)
 
 
-def generate_widths(device_name: str, reg_list: t.List[Register]) -> str:
-    rv: t.List[str] = []
+@dataclass(frozen=True)
+class Interrupt:
+    number: int
+    name: str
 
-    cap_device = device_name.upper()
-    for a_reg in reg_list:
-        name = a_reg.name.upper()
-        width = a_reg.width
-        macro_line = f'#define METAL_{cap_device}_{name}_WIDTH {width}'
-        rv.append(macro_line)
+    @staticmethod
+    def make_interrupt(number, name=''):
+        return Interrupt(number, name)
+
+
+def generate_interrupt_list(object_model: JSONType) -> t.List[Interrupt]:
+    p = walk(object_model)
+    p = filter(lambda x: '_types' in x, p)
+    p = filter(lambda x: f'OMInterrupt' in x['_types'], p)
+
+    rv = []
+    for an_interrupt in p:
+        number = an_interrupt['numberAtReceiver']
+        name = an_interrupt.get('name', '')
+        if '@' in name:
+            name = ''
+        rv.append(Interrupt.make_interrupt(number, name))
+
+    return rv
+
+
+def generate_interrupt_defines(int_list: t.List[Interrupt], device: str) -> str:
+    rv = []
+    interrupts = []
+    dev = device.upper().replace(' ', '')
+
+    for an_interrupt in int_list:
+        number = an_interrupt.number
+        if an_interrupt.name:
+            name = an_interrupt.name.upper().replace(' ', '')
+            rv.append(f'#define {dev}_{name}_IT {number}')
+        interrupts.append(an_interrupt.number)
+
+    rv.append(f'#define {dev}_INTERRUPT_COUNT {len(interrupts)}')
+    rv.append(f'#define {dev}_INTERRUPTS {{ {",".join(map(str,interrupts)) } }}')
 
     return '\n'.join(rv)
 
@@ -193,10 +252,13 @@ def generate_widths(device_name: str, reg_list: t.List[Register]) -> str:
 def generate_base_hdr(vendor: str,
                       device: str,
                       base_addresses: t.List[int],
-                      reglist: t.List[Register]):
+                      reglist: t.List[Register],
+                      intlist: t.List[Interrupt]):
     template = string.Template(textwrap.dedent(METAL_BASE_HDR_TMPL))
 
     base = ", ".join(map(str, map(hex, base_addresses)))
+
+    interrupts = generate_interrupt_defines(intlist, device)
 
     return template.substitute(
         base_address=base,
@@ -205,7 +267,7 @@ def generate_base_hdr(vendor: str,
         device=device,
         cap_device=device.upper(),
         register_offsets=generate_offsets(device, reglist),
-        register_widths=generate_widths(device, reglist)
+        interrupts=interrupts,
     )
 
 
@@ -288,12 +350,15 @@ def main() -> int:
 
             # get regs for every memory region
             for aReg in mr['registerMap']['registerFields']:
-                r_name = aReg['description']['group']
-                r_offset = aReg['bitRange']['base'] // 8
+                r_name = aReg['description']['name']
+                r_group = aReg['description']['group']
+                r_offset = aReg['bitRange']['base']
                 r_width = aReg['bitRange']['size']
                 r = Register.make_register(r_name,
                                            r_offset,
-                                           r_width)
+                                           r_width,
+                                           r_group)
+
                 reglist.append(r)
 
     base_hdr_path = bsp_dir_path / f'bsp_{device}'
@@ -301,11 +366,19 @@ def main() -> int:
     base_header_file_path = base_hdr_path / f'{vendor}_{device}.h'
     if overwrite_existing or not base_header_file_path.exists():
         base_header_file_path.write_text(
-            generate_base_hdr(vendor, device, bases, reglist)
+            generate_base_hdr(vendor,
+                              device,
+                              bases,
+                              reglist,
+                              generate_interrupt_list(object_model))
         )
     else:
         print(f"{str(base_header_file_path)} exists, not creating.",
               file=sys.stderr)
+
+    for k, v in NAME_DICT.items():
+        if v > 1:
+            print(f'Variable {k} repeated', file=sys.stderr)
 
     return 0
 
