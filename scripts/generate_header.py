@@ -215,10 +215,21 @@ class Interrupt:
         return Interrupt(number, name)
 
 
-def generate_interrupt_list(object_model: JSONType) -> t.List[Interrupt]:
+def generate_interrupt_list(object_model: JSONType, device: str) -> t.List[Interrupt]:
+
+    def type_match(dev: str, types: t.List[str]):
+        d_str = dev.lower()
+        for a_type in types:
+            if a_type.lower().endswith(d_str):
+                return True
+        return False
+
     p = walk(object_model)
     p = filter(lambda x: '_types' in x, p)
-    p = filter(lambda x: f'OMInterrupt' in x['_types'], p)
+    p = filter(lambda x: type_match(device, x['_types']), p)
+    p = walk(list(p))
+    p = filter(lambda x: '_types' in x, p)
+    p = filter(lambda x: 'OMInterrupt' in x['_types'], p)
 
     rv = []
     for an_interrupt in p:
@@ -245,6 +256,7 @@ def generate_interrupt_defines(int_list: t.List[Interrupt], device: str) -> str:
 
     rv.append(f'#define {dev}_INTERRUPT_COUNT {len(interrupts)}')
     rv.append(f'#define {dev}_INTERRUPTS {{ {",".join(map(str,interrupts)) } }}')
+    rv.append(f'#define {dev}_INTERRUPT_START {min(interrupts)}')
 
     return '\n'.join(rv)
 
@@ -370,7 +382,7 @@ def main() -> int:
                               device,
                               bases,
                               reglist,
-                              generate_interrupt_list(object_model))
+                              generate_interrupt_list(object_model, device))
         )
     else:
         print(f"{str(base_header_file_path)} exists, not creating.",
