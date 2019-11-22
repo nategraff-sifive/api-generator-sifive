@@ -37,8 +37,8 @@ def walk(j_obj: JSONType) -> t.Iterator[JSONType]:
 
 
 # Data Classes
-# we pull RegisterField and Interrupts from the Object Model
-# this are the data classes we use to represent them
+# we pull RegisterFields, Interrupts, and Devices from the Object Model.
+# These are the data classes we use to represent them
 
 @dataclass(frozen=True)
 class RegisterField:
