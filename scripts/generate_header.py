@@ -13,7 +13,7 @@ from collections import Counter
 PlainJSONType = t.Union[dict, list, t.AnyStr, float, bool]
 JSONType = t.Union[PlainJSONType, t.Iterator[PlainJSONType]]
 
-NAME_DICT = Counter()
+NAME_COLLISION_DICT = Counter()
 
 # Json utility
 
@@ -37,41 +37,41 @@ def walk(j_obj: JSONType) -> t.Iterator[JSONType]:
 
 
 # Data Classes
-# we pull Register and Interrupts from the Object Model
+# we pull RegisterField and Interrupts from the Object Model
 # this are the data classes we use to represent them
 
 @dataclass(frozen=True)
-class Register:
+class RegisterField:
     """
-    Description of memory-mapped control register within a device
+    data class to hold information about a register field.
     """
     name: str
-    offset: int  # in bytes
+    offset: int  # in bits
     width: int  # in bits
-    group: str
+    regFieldGroup: str
     all_registers: t.ClassVar = {}
 
     @staticmethod
     def make_register(name: str, offset: int, width: int, group: str) \
-            -> "Register":
+            -> "RegisterField":
         key = f'{name}-{group}'
-        if name != 'reserved' and key in Register.all_registers:
-            print(key)
-            print(name)
-            print(group)
-            if Register.all_registers[key].offset != offset or \
-               Register.all_registers[key].offset != width or \
-               Register.all_registers[key].offset != group:
-                raise Exception
+        if name != 'reserved' and key in RegisterField.all_registers:
+            register_field = RegisterField(name, offset, width, group)
+            if RegisterField.all_registers[key] != register_field:
+                raise Exception(f'Non matching register fields {key}')
             else:
-                return Register.all_registers[key]
+                return RegisterField.all_registers[key]
 
-        Register.all_registers[key] = Register(name, offset, width, group)
-        return Register.all_registers[key]
+        RegisterField.all_registers[key] = RegisterField(name, offset, width, group)
+        return RegisterField.all_registers[key]
 
 
 @dataclass(frozen=True)
 class Interrupt:
+    """
+    Data class to hold information about an interrupt. May be
+    unnamed, in which case the name is and empty string.
+    """
     number: int
     name: str
     all_interrupts: t.ClassVar = {}
@@ -79,8 +79,9 @@ class Interrupt:
     @staticmethod
     def make_interrupt(number, name=''):
         if name and name in Interrupt.all_interrupts:
-            if Interrupt.all_interrupts[name].number != number:
-                raise Exception
+            an_interrupt = Interrupt(number, name)
+            if Interrupt.all_interrupts[name] != an_interrupt:
+                raise Exception(f"duplicate interrupt {name}")
             else:
                 return Interrupt.all_interrupts[name]
 
@@ -90,12 +91,16 @@ class Interrupt:
 
 @dataclass(frozen=True)
 class DeviceBase:
+    """
+    Data class to hold information about a device on the SOC. Include all
+    register fields and interrupts for the device.
+    """
     name: str
     index: int
     base_interrupt: int
     base_address: int
     interrupts: t.List[Interrupt]
-    registers: t.List[Register]
+    registers: t.List[RegisterField]
 
 ###
 # templates
@@ -112,30 +117,30 @@ METAL_BASE_HDR_TMPL = \
     #ifndef ${vendor}_${device}_h
     #define ${vendor}_${device}_h
     
-    #define ${cap_device}_COUNT ${dev_count}
+    #define ${capitalized_device}_COUNT ${dev_count}
 
-    // To use ${cap_device}_INTERRUPT_BASES, use it as the
+    // To use ${capitalized_device}_INTERRUPT_BASES, use it as the
     // initializer to an array of ints, i.e.
-    // int interrupt_bases[${cap_device}_COUNT] = ${cap_device}_INTERRUPT_BASES;
-    // there are ${cap_device}_INTERRUPT_COUNT interrupts per
+    // int interrupt_bases[${capitalized_device}_COUNT] = ${capitalized_device}_INTERRUPT_BASES;
+    // there are ${capitalized_device}_INTERRUPT_COUNT interrupts per
     // device.
     
     ${interrupts}
 
-    // To use ${cap_device}_BASES, use it as the
+    // To use ${capitalized_device}_BASES, use it as the
     // initializer to an array of ints, i.e.
-    // int bases[${cap_device}_COUNT] = ${cap_device}_BASES;
+    // int bases[${capitalized_device}_COUNT] = ${capitalized_device}_BASES;
 
-    #define ${cap_device}_BASES {${base_address}}
+    #define ${capitalized_device}_BASES {${base_address}}
 
     // : these macros have control_base as a hidden input
     // use with the _BYTE #define's
-    #define METAL_${cap_device}_REG(offset) ((unsigned long)control_base + (offset))
-    #define METAL_${cap_device}_REGW(offset) \\
-       (__METAL_ACCESS_ONCE((__metal_io_u32 *)METAL_${cap_device}_REG(offset)))
+    #define METAL_${capitalized_device}_REG(offset) ((unsigned long)control_base + (offset))
+    #define METAL_${capitalized_device}_REGW(offset) \\
+       (__METAL_ACCESS_ONCE((__metal_io_u32 *)METAL_${capitalized_device}_REG(offset)))
 
-    #define METAL_${cap_device}_REGBW(offset) \\
-       (__METAL_ACCESS_ONCE((uint8_t *)METAL_${cap_device}_REG(offset)))
+    #define METAL_${capitalized_device}_REGBW(offset) \\
+       (__METAL_ACCESS_ONCE((uint8_t *)METAL_${capitalized_device}_REG(offset)))
 
     // METAL_NAME => bit offset from base
     // METAL_NAME_BYTE => (uint8_t *) offset from base
@@ -160,32 +165,31 @@ def generate_offsets(device_name: str, dev_list: t.List[DeviceBase]) -> str:
     """
     rv: t.List[str] = []
 
-    cap_device = device_name.upper()
+    capitalized_device = device_name.upper()
     if dev_list:
         # only need to check the first device
         for a_reg in dev_list[0].registers:
             if a_reg.name == 'reserved':
                 continue
             name = a_reg.name.upper().strip().replace(" ", "")
-            group = a_reg.group.upper().strip().replace(" ", "")
+            group = a_reg.regFieldGroup.upper().strip().replace(" ", "")
             offset = a_reg.offset
             width = a_reg.width
 
             if name.startswith(group.split('_')[-1] + "_"):
                 group = "_".join(group.split('_')[:-1])
 
+            infix = ''
             if group is not "":
-                macro_line = f'#define {cap_device}_REGISTER_{group}_{name} {offset}\n'
-                NAME_DICT[f'{cap_device}_REGISTER_{group}_{name}'] += 1
-                macro_line += f'#define {cap_device}_REGISTER_{group}_{name}_BYTE {offset >> 3}\n'
-                macro_line += f'#define {cap_device}_REGISTER_{group}_{name}_BIT {offset & 0x7}\n'
-                macro_line += f'#define {cap_device}_REGISTER_{group}_{name}_WIDTH {width}\n'
-            else:
-                macro_line = f'#define {cap_device}_REGISTER_{name} {offset}\n'
-                NAME_DICT[f'{cap_device}_REGISTER_{name}'] += 1
-                macro_line += f'#define {cap_device}_REGISTER_{name}_BYTE {offset >> 3}\n'
-                macro_line += f'#define {cap_device}_REGISTER_{name}_BIT {offset & 0x7}\n'
-                macro_line += f'#define {cap_device}_REGISTER_{name}_WIDTH {width}\n'
+                infix = f'_{group}'
+
+            prefix = f'{capitalized_device}_REGISTER{infix}_{name}'
+
+            NAME_COLLISION_DICT[prefix] += 1
+            macro_line =  f'#define {prefix} {offset}\n'
+            macro_line += f'#define {prefix}_BYTE {offset >> 3}\n'
+            macro_line += f'#define {prefix}_BIT {offset & 0x7}\n'
+            macro_line += f'#define {prefix}_WIDTH {width}\n'
 
             rv.append(macro_line)
 
@@ -194,6 +198,13 @@ def generate_offsets(device_name: str, dev_list: t.List[DeviceBase]) -> str:
 
 def generate_interrupt_defines(bases: t.List[DeviceBase],
                                device: str) -> str:
+    """
+    generate interrupt sec of file
+
+    :param bases: list of devices
+    :param device: the name of the device
+    :return: the interrupt section of the header file.
+    """
     rv = []
     dev = device.upper().replace(' ', '')
 
@@ -218,17 +229,21 @@ def generate_interrupt_defines(bases: t.List[DeviceBase],
 
     return '\n'.join(rv)
 
-# generate the the base header
-
 
 def generate_base_hdr(vendor: str,
                       device: str,
                       devlist: t.List[DeviceBase]):
+    """
+    Master function to generate the include file.
+
+    :param vendor:  string of the vendor name
+    :param device:  string of the device name
+    :param devlist: list of devices
+    :return: a string for the header file
+    """
     template = string.Template(textwrap.dedent(METAL_BASE_HDR_TMPL))
 
-    base = ", ".join(map(str, map(hex, (i.base_address
-                                        for i in devlist))))
-
+    base = ", ".join(hex(i.base_address) for i in devlist)
     interrupts = generate_interrupt_defines(devlist, device)
 
     return template.substitute(
@@ -236,16 +251,23 @@ def generate_base_hdr(vendor: str,
         dev_count=len(devlist),
         vendor=vendor,
         device=device,
-        cap_device=device.upper(),
+        capitalized_device=device.upper(),
         register_offsets=generate_offsets(device, devlist),
         interrupts=interrupts,
     )
 
 
-# get the necessary info
+# parsing the OM file
 
 def find_interrupts(object_model: JSONType, device: str) \
         -> t.List[Interrupt]:
+    """
+    given a parsed device, return the interrupts for the device
+
+    :param object_model: a device parsed from the object model
+    :param device: a string name of the device
+    :return: a list of the interrupts
+    """
 
     def type_match(dev: str, types: t.List[str]):
         d_str = dev.lower()
@@ -276,8 +298,14 @@ def find_interrupts(object_model: JSONType, device: str) \
     return rv
 
 
-def find_registers(object_model: JSONType) -> t.List[Register]:
-    reglist: t.List[Register] = []
+def find_registers(object_model: JSONType) -> t.List[RegisterField]:
+    """
+    given a parsed device, return the register fields for the device
+
+    :param object_model: a device parsed from the object model
+    :return: a list of register fields
+    """
+    reglist: t.List[RegisterField] = []
     for mr in object_model['memoryRegions']:
         # get base address for each memory region
         if len(mr['addressSets']) != 1:
@@ -290,10 +318,10 @@ def find_registers(object_model: JSONType) -> t.List[Register]:
             r_group = aReg['description']['group']
             r_offset = aReg['bitRange']['base']
             r_width = aReg['bitRange']['size']
-            r = Register.make_register(r_name,
-                                       r_offset,
-                                       r_width,
-                                       r_group)
+            r = RegisterField.make_register(r_name,
+                                            r_offset,
+                                            r_width,
+                                            r_group)
 
             reglist.append(r)
 
@@ -302,6 +330,12 @@ def find_registers(object_model: JSONType) -> t.List[Register]:
 
 def find_devices(object_model: JSONType,
                  device: str) -> JSONType:
+    """
+
+    :param object_model: The full object model for the soc
+    :param device: the name of the device in question
+    :return: a list of the devices in the soc
+    """
     p = walk(object_model)
     p = filter(lambda x: '_types' in x, p)
     p = filter(lambda x: f'OM{device}' in x['_types'], p)
@@ -398,7 +432,7 @@ def main() -> int:
         print(f"{str(base_header_file_path)} exists, not creating.",
               file=sys.stderr)
 
-    for k, v in NAME_DICT.items():
+    for k, v in NAME_COLLISION_DICT.items():
         if v > 1:
             print(f'Variable {k} repeated', file=sys.stderr)
 
