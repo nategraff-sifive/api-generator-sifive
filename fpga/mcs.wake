@@ -29,9 +29,15 @@ global target makeBitstream plan =
     def runDir = outputDir
 
     def ffile =
-      map (relative runDir _.getPathName) vsrcs
-      | catWith "\n"
-      | write "{runDir}/verilog.F"
+      def vnames =
+        vsrcs
+        | map (relative runDir _.getPathName)
+        | catWith "\n"
+      def enames =
+        getenv "WAKE_IP_RESOURCE_FILES"
+        | getOrElse ""
+        | replace `:` "\n"
+      write "{runDir}/verilog.F" "{vnames}{enames}"
 
     def tclArgs =
       def tclsString =
