@@ -4,7 +4,8 @@ tuple VCSCompilePlan =
   global Defines:     List NamedArg
   global SourceFiles: List Path
   global Plusargs:    List NamedArg
-  global ExtraArgs:   List NamedArg
+  global ExtraArgs:   List String
+  global Visible:     List Path
   global TmpDir:      String
   global OutputDir:   String
 
@@ -20,6 +21,7 @@ global def makeVCSCompilePlan sourceFiles outputDir =
   sourceFiles           # Files
   Nil                   # Plusargs
   Nil                   # ExtraArgs
+  Nil                   # Visible
   "{outputDir}/tmp"     # TmpDir
   outputDir             # OutputDir
 
@@ -29,7 +31,7 @@ def compileCmdlineArgs options =
   def defines      = options.getVCSCompilePlanDefines
   def plusargs     = options.getVCSCompilePlanPlusargs
   def rawFiles     = options.getVCSCompilePlanSourceFiles
-  def otherArgs    = namedArgsToListString runDir options.getVCSCompilePlanExtraArgs
+  def otherArgs    = options.getVCSCompilePlanExtraArgs
 
   def files = distinctBy (scmpIdentifier _.getPathName _.getPathName) rawFiles
   def runDir = outputDir
@@ -50,10 +52,11 @@ def compileInputs options =
   def includeDirs  = options.getVCSCompilePlanIncludeDirs
   def srcFiles     = options.getVCSCompilePlanSourceFiles
   def tmpDir       = options.getVCSCompilePlanTmpDir
+  def visible      = options.getVCSCompilePlanVisible
 
   def includeSources = map (sources _ `.*`) includeDirs | flatten
 
-  mkdir tmpDir, mkdir outputDir, includeSources ++ srcFiles
+  mkdir tmpDir, mkdir outputDir, includeSources ++ srcFiles ++ visible
 
 global def doVCSCompile options =
   def outputDir = options.getVCSCompilePlanOutputDir
@@ -100,7 +103,7 @@ tuple VCSExecutePlan =
   global Plusargs:       List NamedArg
   global VisibleFiles:   List Path
   global CompileOutputs: VCSCompileOutputs
-  global ExtraArgs:      List NamedArg
+  global ExtraArgs:      List String
   global StderrTailNum:  Integer
   global StdoutTailNum:  Integer
 
@@ -122,7 +125,7 @@ global def doVCSExecute options =
 
   def cmdline =
     def plusargs = namedArgsToCmdline outputDir "+" "=" options.getVCSExecutePlanPlusargs
-    def extraArgs = namedArgsToListString outputDir options.getVCSExecutePlanExtraArgs
+    def extraArgs = options.getVCSExecutePlanExtraArgs
     relative outputDir wrapperScript.getPathName,
     relative outputDir stdoutFile,
     relative outputDir stderrFile,

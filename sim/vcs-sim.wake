@@ -11,7 +11,7 @@ def makeVCSDUTSimulatorPlan testDriver waves score compileOptions executeOptions
 
 tuple VCSDUTSimCompileOptions =
   global GenericOpts: DUTSimCompileOptions
-  global ExtraArgs:   List NamedArg
+  global ExtraArgs:   List String
 
 global def getVCSDUTSimCompileOptionsIncludeDirs = _.getVCSDUTSimCompileOptionsGenericOpts.getDUTSimCompileOptionsIncludeDirs
 global def getVCSDUTSimCompileOptionsDefines     = _.getVCSDUTSimCompileOptionsGenericOpts.getDUTSimCompileOptionsDefines
@@ -73,7 +73,7 @@ def toVCSSimCompilePlan privateOpts outputDir =
 
 tuple VCSDUTSimExecuteOptions =
   global GenericOpts: DUTSimExecuteOptions
-  global ExtraArgs:   List NamedArg
+  global ExtraArgs:   List String
 
 global def getVCSDUTSimExecuteOptionsPlusargs     = _.getVCSDUTSimExecuteOptionsGenericOpts.getDUTSimExecuteOptionsPlusargs
 global def getVCSDUTSimExecuteOptionsVisibleFiles = _.getVCSDUTSimExecuteOptionsGenericOpts.getDUTSimExecuteOptionsVisibleFiles
@@ -161,24 +161,24 @@ global def makeVCSDUTSimulator plan =
 def vcsCompileOptsExtract waves dut =
 
   def extraArgs =
-    NamedArg "-full64",             NamedArg "-notice",      NamedArg "-error=VCM-HFUFR",
-    NamedArg "-error=LFCOR",        NamedArg "-error=CFCOR", NamedArg "-error=BMII",
-    NamedArg "-timescale=1ns/10ps", NamedArg "-quiet",       NamedArg "+vcs+lic+wait",
-    NamedArg "-Mupdate",            NamedArg "+vc+list",     NamedArg "-sverilog",
-    NamedArg "-ntb_opts",           NamedArg "uvm-1.2",      NamedArg "-j4",
-    NamedArg "+rad",                NamedArg "-hsopt=gates", NamedArg "-O3",
-    NamedArg "-reportstats",        NamedArg "-assert",      NamedArg "svaext",
-    NamedArg "-LDFLAGS -lrt",       Nil
+    "-full64",             "-notice",      "-error=VCM-HFUFR",
+    "-error=LFCOR",        "-error=CFCOR", "-error=BMII",
+    "-timescale=1ns/10ps", "-quiet",       "+vcs+lic+wait",
+    "-Mupdate",            "+vc+list",     "-sverilog",
+    "-ntb_opts",           "uvm-1.2",      "-j4",
+    "+rad",                "-hsopt=gates", "-O3",
+    "-reportstats",        "-assert",      "svaext",
+    "-LDFLAGS -lrt",       Nil
 
   def withWavesOptions opts =
     if waves
     then
       def withExtraArgs =
-        NamedArg "-kdb",
-        NamedArg "-lca",
-        NamedArg "-debug_access+r+line+class+driver",
-        NamedArg "-LDFLAGS",
-        NamedArg "-fno-lto",
+        "-kdb",
+        "-lca",
+        "-debug_access+r+line+class+driver",
+        "-LDFLAGS",
+        "-fno-lto",
         _
       def withDefines =
         NamedArg "SVT_FSDB_ENABLE",
@@ -199,13 +199,13 @@ def vcsCompileOptsExtract waves dut =
 
 def vcsExecuteOptsExtract waves dut =
   def withExtraArgs =
-    NamedArgString "-assert" "old_ctrl_msg",
-    NamedArgString "-assert" "nopostproc",
-    NamedArgString "-assert" "global_finish_maxfail=10",
-    NamedArg "-error=STASKW_CO1",
-    NamedArg "-error=STASKW_RMCOF",
-    NamedArg "-error=STASKW_RMIEAFL",
-    NamedArg "-error=PHNE",
+    "-assert", "old_ctrl_msg",
+    "-assert", "nopostproc",
+    "-assert", "global_finish_maxfail=10",
+    "-error=STASKW_CO1",
+    "-error=STASKW_RMCOF",
+    "-error=STASKW_RMIEAFL",
+    "-error=PHNE",
     _
 
   def withWavesOptions opts =
