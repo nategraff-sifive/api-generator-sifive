@@ -28,19 +28,6 @@ global def makeDriverImplementation compatibleDevices vendor deviceName driverSo
 
 global topic driverImplementations: DriverImplementation
 
-target driverImpCompatibilityTrees Unit =
-  subscribe driverImplementations
-  | map (\p p → listToTree scmp p.getDriverImplementationCompatibilityStrings)
-
-target getCompatibleDriverImplementation compatibleString =
-  def drivers = filter (compatibleString ∈ _.getPairSecond) Unit.driverImpCompatibilityTrees
-  match drivers
-    one, Nil = Some one.getPairFirst
-    Nil = None
-    _ =
-      def _ = printlnLevel logWarn "WARNING: More than one driver implementation available for device {compatibleString}. A random one will be chosen."
-      None
-
 # get a list of compatible strings for each device in a given Path of a DTS JSON file
 global target getCompatibleLists dtsJSON =
   def isDevice = match _
@@ -58,23 +45,3 @@ global target getCompatibleLists dtsJSON =
     Fail e =
       def _ = printlnLevel logWarn "WARNING: Could not parse DTS JSON: {e.getErrorCause}"
       Nil
-
-# Return DriverImplementations available for a given DUT
-global def getDriverImplementationsForDUT dut =
-  def compatibleLists = getCompatibleLists dut.getDUTDTSJSON
-  def getImpForCompatibleList compatibleList =
-    compatibleList
-    | mapPartial getCompatibleDriverImplementation
-    | head
-  mapPartial getImpForCompatibleList compatibleLists
-
-# Get base header for given DUT in directory outputDir
-global def getBaseHeaderForDUT dut outputDir =
-  def omFile = dut.getDUTObjectModelFile
-  def imps = dut.getDriverImplementationsForDUT
-  def generateBaseHeaderForDriver driver =
-    def deviceName = driver.getDriverImplementationDeviceName
-    def vendor = driver.getDriverImplementationVendor
-    makeBaseHeaderPlan vendor deviceName omFile "{outputDir}/{deviceName}"
-    | generateBaseHeader
-  map generateBaseHeaderForDriver imps
