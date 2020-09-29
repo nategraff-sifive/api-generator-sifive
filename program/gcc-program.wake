@@ -1,3 +1,5 @@
+def defaultSiFiveRISCVResources = "riscv-tools/2020.08.02", Nil
+
 tuple GCCProgramPlan =
   global Sources:      List Path
   global IsCPlusPlus:  Boolean

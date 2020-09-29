@@ -26,9 +26,7 @@ tuple DriverImplementation =
 global def makeDriverImplementation compatibleDevices vendor deviceName driverSources includeDirs visible =
   DriverImplementation compatibleDevices vendor deviceName driverSources includeDirs visible
 
-target driverImpCompatibilityTrees Unit =
-  subscribe driverImplementations
-  | map (\p p → listToTree scmp p.getDriverImplementationCompatibilityStrings)
+target driverImpCompatibilityTrees Unit = Nil
 
 target getCompatibleDriverImplementation compatibleString =
   def drivers = filter (compatibleString ∈ _.getPairSecond) Unit.driverImpCompatibilityTrees
@@ -72,14 +70,3 @@ global def getDriverImplementationsForDUT dut =
     | mapPartial getCompatibleDriverImplementation
     | head
   mapPartial getImpForCompatibleList compatibleLists
-
-# Get base header for given DUT in directory outputDir
-global def getBaseHeaderForDUT dut outputDir =
-  def omFile = dut.getDUTObjectModelFile
-  def imps = dut.getDriverImplementationsForDUT
-  def generateBaseHeaderForDriver driver =
-    def deviceName = driver.getDriverImplementationDeviceName
-    def vendor = driver.getDriverImplementationVendor
-    makeBaseHeaderPlan vendor deviceName omFile "{outputDir}/{deviceName}"
-    | generateBaseHeader
-  map generateBaseHeaderForDriver imps
